@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Pill Box - Giám Sát Hộp Thuốc Thông Minh</title>
+  <meta name="description" content="Hệ thống giám sát và quản lý hộp đựng thuốc thông minh từ xa qua Firebase Realtime Database">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  
+  <!-- Firebase JS SDK (Compat v9) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+</head>
+<body>
+  <div class="app-container">
+    <!-- HEADER -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z"/>
+            <path d="m8.5 8.5 7 7"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">HỘP THUỐC THÔNG MINH</h1>
+          <p class="brand-subtitle">Hệ thống Giám sát & Quản lý Tuân thủ Dùng thuốc Từ xa</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Live Connection Status -->
+        <div class="status-pill" id="connStatusPill">
+          <span class="pulse-dot" id="connPulse"></span>
+          <span id="connStatusText">Đang kết nối cơ sở dữ liệu...</span>
+        </div>
+
+        <button class="btn btn-primary" id="btnOpenConfig">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+          Cấu hình Lịch uống
+        </button>
+      </div>
+    </header>
+
+    <!-- MAIN DASHBOARD CONTENT -->
+    <main class="dashboard-grid">
+      
+      <!-- KHỐI 1: THÔNG SỐ VẬN HÀNH THIẾT BỊ -->
+      <section class="section-container" aria-label="Thông số thiết bị">
+        <div class="section-header">
+          <h2 class="section-title">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+            </svg>
+            Thông số Vận hành Thiết bị
+          </h2>
+          <span class="text-muted" id="lastSeenDisplay">Cập nhật: Đang đồng bộ...</span>
+        </div>
+
+        <div class="telemetry-cards">
+          <!-- Nhiệt độ -->
+          <div class="card stat-card" id="tempCard">
+            <div class="stat-icon temp-icon">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/>
+              </svg>
+            </div>
+            <div class="stat-meta">
+              <span class="stat-label">Nhiệt độ buồng thuốc</span>
+              <div class="stat-value"><span id="teleTemp">--</span> <small>°C</small></div>
+              <span class="stat-hint" id="tempAlertHint">Tiêu chuẩn bảo quản: &lt; 35°C</span>
+            </div>
+          </div>
+
+          <!-- Độ ẩm -->
+          <div class="card stat-card" id="humidCard">
+            <div class="stat-icon humid-icon">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
+              </svg>
+            </div>
+            <div class="stat-meta">
+              <span class="stat-label">Độ ẩm buồng thuốc</span>
+              <div class="stat-value"><span id="teleHumid">--</span> <small>%</small></div>
+              <span class="stat-hint" id="humidAlertHint">Tiêu chuẩn bảo quản: &lt; 75%</span>
+            </div>
+          </div>
+
+          <!-- Trạng thái vận hành máy -->
+          <div class="card stat-card" id="fsmCard">
+            <div class="stat-icon state-icon">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 6v6l4 2"/>
+              </svg>
+            </div>
+            <div class="stat-meta">
+              <span class="stat-label">Trạng thái hoạt động</span>
+              <div class="stat-value state-badge" id="teleState">ĐANG KẾT NỐI</div>
+              <span class="stat-hint" id="fsmDescription">Đang kiểm tra kết nối thiết bị</span>
+            </div>
+          </div>
+
+          <!-- Cảnh báo âm thanh & đèn -->
+          <div class="card stat-card" id="alarmCard">
+            <div class="stat-icon alarm-icon" id="alarmIcon">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </svg>
+            </div>
+            <div class="stat-meta">
+              <span class="stat-label">Cảnh báo hệ thống</span>
+              <div class="stat-value alarm-badge" id="teleAlarm">Bình thường</div>
+              <span class="stat-hint" id="alarmHint">Không có cảnh báo phát sinh</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- KHỐI 2: DANH SÁCH CÁC NGĂN THUỐC -->
+      <section class="section-container" aria-label="Tình trạng các ngăn thuốc">
+        <div class="section-header">
+          <h2 class="section-title">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+              <rect width="20" height="14" x="2" y="5" rx="2"/>
+              <path d="M2 10h20"/>
+            </svg>
+            Danh sách Ngăn Thuốc
+          </h2>
+          <span class="text-muted" id="compCountLabel">3 ngăn chứa</span>
+        </div>
+
+        <div class="compartments-grid" id="compartmentsContainer">
+          <div class="card comp-card loading-card">
+            <p class="text-muted">Đang tải thông tin các ngăn thuốc...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- KHỐI 3: NHẬT KÝ TUÂN THỦ DÙNG THUỐC -->
+      <section class="section-container" aria-label="Nhật ký uống thuốc">
+        <div class="section-header">
+          <h2 class="section-title">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+              <polyline points="10 9 9 9 8 9"/>
+            </svg>
+            Nhật ký Tuân thủ Dùng thuốc
+          </h2>
+          <span class="text-muted" id="logCountLabel">0 bản ghi</span>
+        </div>
+
+        <div class="card table-card">
+          <div class="table-responsive">
+            <table class="data-table" id="eventsTable">
+              <thead>
+                <tr>
+                  <th>Thời gian</th>
+                  <th>Mã phiên</th>
+                  <th>Ngăn thuốc</th>
+                  <th>Tên & Mã thuốc</th>
+                  <th>Liều chỉ định</th>
+                  <th>Thực tế lấy</th>
+                  <th>Xác nhận người bệnh</th>
+                  <th>Kết quả đánh giá</th>
+                </tr>
+              </thead>
+              <tbody id="eventsTableBody">
+                <tr>
+                  <td colspan="8" class="text-center text-muted" style="padding: 32px;">
+                    Chưa có dữ liệu phiên uống thuốc nào được ghi nhận.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="app-footer">
+      <p>Hệ thống Hộp đựng Thuốc Thông minh • Giám sát & Quản lý Tuân thủ Dùng thuốc Từ xa</p>
+    </footer>
+  </div>
+
+  <!-- MODAL: CẤU HÌNH LỊCH TRÌNH TỪ XA -->
+  <div class="modal-backdrop" id="configModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 20h9"/>
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          </svg>
+          Cấu hình Lịch uống & Liều lượng
+        </h3>
+        <button class="modal-close" id="btnCloseConfig" aria-label="Đóng">&times;</button>
+      </div>
+      <div class="modal-body" id="configFormContent">
+        <p class="text-muted">Đang tải biểu mẫu cấu hình...</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btnCancelConfig">Hủy bỏ</button>
+        <button class="btn btn-primary" id="btnSaveConfig">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          Lưu thay đổi
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

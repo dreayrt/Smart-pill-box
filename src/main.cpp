@@ -2,6 +2,7 @@
 #include "config.h"
 #include "state_machine.h"
 #include "hardware_interface.h"
+#include "sync_interface.h"
 
 // Thời gian giả lập để chạy thử khi chưa có chip RTC thật
 static uint8_t simHour = 7;
@@ -32,6 +33,9 @@ void setup() {
 
     // Khởi tạo cỗ máy FSM và lịch uống
     fsm_init();
+
+    // Khởi tạo kết nối mạng và Firebase Cloud Sync (Thành viên 3)
+    cloud_init();
 
     printHelpMenu();
     Serial.printf("\033[1;30;47m [HỆ THỐNG] \033[0m Đồng hồ giả lập hiện tại: \033[1;32m%02d:%02d:00\033[0m | Trạng thái: \033[1;33mSTATE_IDLE\033[0m\r\n\r\n", 
@@ -116,6 +120,9 @@ void loop() {
 
     // 2. Cập nhật máy trạng thái FSM liên tục (Non-blocking)
     fsm_update(btnInput, simHour, simMinute, now);
+
+    // 2.1. Cập nhật tiến trình đồng bộ mạng & Firebase (Thành viên 3)
+    cloud_loop();
 
     // 3. Giả lập đồng hồ trôi nhẹ mỗi 1 phút nếu không có thao tác
     if (now - lastClockTick >= 60000UL) {
