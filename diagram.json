@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "author": "Nhom 13",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led-green",
+      "top": -80,
+      "left": 180,
+      "attrs": { "color": "green", "label": "LED NHAC (D2)" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led-red",
+      "top": -80,
+      "left": 260,
+      "attrs": { "color": "red", "label": "LED LOI (D15)" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo",
+      "top": -120,
+      "left": -120,
+      "attrs": { "label": "SERVO KHOA NGAN (D13)" }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buzzer",
+      "top": -90,
+      "left": 60,
+      "attrs": { "label": "BUZZER (D25)" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn-take",
+      "top": 250,
+      "left": -80,
+      "attrs": { "color": "green", "label": "TAKE (D12)" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn-snooze",
+      "top": 250,
+      "left": 20,
+      "attrs": { "color": "yellow", "label": "SNOOZE (D33)" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn-remove",
+      "top": 250,
+      "left": 120,
+      "attrs": { "color": "blue", "label": "REMOVE (D35)" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn-menu",
+      "top": 250,
+      "left": 220,
+      "attrs": { "color": "red", "label": "MENU (D26)" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+
+    [ "esp:2", "led-green:A", "green", [ "v0" ] ],
+    [ "esp:GND.1", "led-green:C", "black", [ "v0" ] ],
+
+    [ "esp:15", "led-red:A", "red", [ "v0" ] ],
+    [ "esp:GND.1", "led-red:C", "black", [ "v0" ] ],
+
+    [ "esp:13", "servo:PWM", "orange", [ "v0" ] ],
+    [ "esp:5V", "servo:V+", "red", [ "v0" ] ],
+    [ "esp:GND.2", "servo:GND", "black", [ "v0" ] ],
+
+    [ "esp:25", "buzzer:2", "purple", [ "v0" ] ],
+    [ "esp:GND.2", "buzzer:1", "black", [ "v0" ] ],
+
+    [ "esp:12", "btn-take:2.1", "green", [ "v0" ] ],
+    [ "esp:GND.2", "btn-take:1.1", "black", [ "v0" ] ],
+
+    [ "esp:33", "btn-snooze:2.1", "yellow", [ "v0" ] ],
+    [ "esp:GND.2", "btn-snooze:1.1", "black", [ "v0" ] ],
+
+    [ "esp:35", "btn-remove:2.1", "blue", [ "v0" ] ],
+    [ "esp:GND.2", "btn-remove:1.1", "black", [ "v0" ] ],
+
+    [ "esp:26", "btn-menu:2.1", "red", [ "v0" ] ],
+    [ "esp:GND.2", "btn-menu:1.1", "black", [ "v0" ] ]
+  ],
+  "dependencies": {}
+}
