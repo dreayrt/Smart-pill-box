@@ -45,7 +45,7 @@ enum ButtonEvent {
 // ==========================================
 const unsigned long SNOOZE_DURATION_MS = 5 * 60 * 1000UL;  // 5 phút hoãn chuông
 const unsigned long VERIFY_TIMEOUT_MS  = 60 * 1000UL;       // 60 giây chờ lấy thuốc
-const unsigned long AUTO_CLOSE_DELAY_MS = 3 * 1000UL;      // 3 giây tự đóng nắp sau khi lấy đủ
+const unsigned long AUTO_CLOSE_DELAY_MS = 8 * 1000UL;      // 8 giây tự đóng nắp sau khi lấy đủ (cho người dùng kịp quan sát & test quá liều)
 const unsigned long DEBOUNCE_DELAY_MS  = 50UL;             // Lọc rung phím bấm
 
 // ==========================================
