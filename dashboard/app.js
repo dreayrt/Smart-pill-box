@@ -14,6 +14,10 @@ const db = firebase.database();
 
 // State cục bộ của Dashboard
 let currentCompartments = {};
+let currentInventory = {};
+let pendingInventoryCommands = {};
+let inventoryCommandStatus = {};
+let modalInitialStock = {};
 let currentDeviceStatus = {};
 let allEventsList = [];
 
@@ -164,6 +168,42 @@ db.ref('config/compartments').on('value', (snap) => {
   renderCompartments(comps);
 });
 
+db.ref('inventory/compartments').on('value', (snap) => {
+  currentInventory = snap.val() || {};
+  renderCompartments(currentCompartments);
+});
+
+db.ref('inventoryCommands/pending').on('value', (snap) => {
+  pendingInventoryCommands = snap.val() || {};
+  renderCompartments(currentCompartments);
+});
+
+db.ref('inventoryCommands/status').on('value', (snap) => {
+  inventoryCommandStatus = snap.val() || {};
+  renderCompartments(currentCompartments);
+});
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[character]);
+}
+
+function getInventorySyncLabel(compartmentId, inventoryNode) {
+  const pendingForCompartment = Object.values(pendingInventoryCommands)
+    .filter(command => command?.compartmentId === compartmentId);
+  const status = inventoryCommandStatus[compartmentId];
+  if (pendingForCompartment.length) {
+    return `${pendingForCompartment.length} yêu cầu tồn kho đang chờ ESP32 xử lý`;
+  }
+  if (status?.state === 'pending') return 'Đang chờ ESP32 xác nhận yêu cầu chỉnh tồn kho';
+  if (status?.state === 'applying') return 'ESP32 đang áp dụng yêu cầu chỉnh tồn kho';
+  if (status?.state === 'rejected') return `ESP32 từ chối: ${escapeHtml(status.message || 'Dữ liệu không hợp lệ')}`;
+  if (status?.state === 'applied') return `ESP32 đã xác nhận yêu cầu gần nhất (${status.appliedStock} viên)`;
+  if (Number.isInteger(inventoryNode?.currentStock)) return 'Tồn kho đã được ESP32 đồng bộ';
+  return 'Chưa có tồn kho được ESP32 xác nhận';
+}
+
 function renderCompartments(comps) {
   compartmentsContainer.innerHTML = '';
   const compKeys = Object.keys(comps).sort();
@@ -185,16 +225,19 @@ function renderCompartments(comps) {
     const classId = `comp-${c.compartmentId ? c.compartmentId.toLowerCase() : 'a'}`;
     card.className = `card comp-card ${classId}`;
 
-    const maxStock = 30;
-    const stock = c.currentStock || 0;
+    const maxStock = 100;
+    const inventoryNode = currentInventory[key] || {};
+    const stock = Number.isInteger(inventoryNode.currentStock)
+      ? inventoryNode.currentStock
+      : (Number.isInteger(c.currentStock) ? c.currentStock : 0);
     const stockPercent = Math.min(100, Math.round((stock / maxStock) * 100));
 
     card.innerHTML = `
       <div class="comp-header">
         <div>
           <span class="comp-id-badge">NGĂN ${c.compartmentId}</span>
-          <h3 class="comp-title">${c.displayName || 'Chưa đặt tên'}</h3>
-          <span class="comp-code">Mã dược phẩm: ${c.medicineCode || '--'}</span>
+          <h3 class="comp-title">${escapeHtml(c.displayName || 'Chưa đặt tên')}</h3>
+          <span class="comp-code">Mã dược phẩm: ${escapeHtml(c.medicineCode || '--')}</span>
         </div>
         <span class="badge ${c.isLoaded ? 'badge-success' : 'badge-warning'}">
           ${c.isLoaded ? 'Sẵn sàng' : 'Chưa nạp thuốc'}
@@ -205,7 +248,7 @@ function renderCompartments(comps) {
         <div class="meta-item">
           <span class="meta-item-label">Thời gian uống</span>
           <span class="meta-item-val" style="color: var(--accent-cyan); font-family: var(--font-mono); font-size: 1.1rem;">
-            ${c.schedule || '--:--'}
+            ${escapeHtml(c.schedule || '--:--')}
           </span>
         </div>
         <div class="meta-item">
@@ -222,6 +265,7 @@ function renderCompartments(comps) {
         <div class="stock-progress-bar">
           <div class="stock-progress-fill" style="width: ${stockPercent}%;"></div>
         </div>
+        <div class="stock-sync-state">${getInventorySyncLabel(key, inventoryNode)}</div>
       </div>
     `;
 
@@ -331,6 +375,7 @@ function renderConfigModalForm() {
   const comps = currentCompartments;
   const keys = ['A', 'B', 'C'];
   let html = '';
+  modalInitialStock = {};
 
   keys.forEach(k => {
     const c = comps[k] || {
@@ -339,9 +384,13 @@ function renderConfigModalForm() {
       medicineCode: `MED-00${k === 'A' ? 1 : k === 'B' ? 2 : 3}`,
       unitsPerDose: 1,
       schedule: k === 'A' ? '08:00' : k === 'B' ? '12:00' : '20:00',
-      currentStock: 10,
+      currentStock: k === 'A' ? 10 : k === 'B' ? 20 : 15,
       isLoaded: true
     };
+    const stock = Number.isInteger(currentInventory[k]?.currentStock)
+      ? currentInventory[k].currentStock
+      : (Number.isInteger(c.currentStock) ? c.currentStock : 0);
+    modalInitialStock[k] = stock;
 
     html += `
       <div style="padding: 16px; background: rgba(255,255,255,0.03); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
@@ -349,15 +398,15 @@ function renderConfigModalForm() {
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
           <div class="form-group">
             <label>Tên Thuốc Chỉ Định</label>
-            <input type="text" class="form-control" id="cfg_name_${k}" value="${c.displayName || ''}">
+            <input type="text" class="form-control" id="cfg_name_${k}" value="${escapeHtml(c.displayName || '')}">
           </div>
           <div class="form-group">
             <label>Mã Dược Phẩm</label>
-            <input type="text" class="form-control" id="cfg_code_${k}" value="${c.medicineCode || ''}">
+            <input type="text" class="form-control" id="cfg_code_${k}" value="${escapeHtml(c.medicineCode || '')}">
           </div>
           <div class="form-group">
             <label>Giờ Uống Thuốc (HH:MM)</label>
-            <input type="time" class="form-control" id="cfg_time_${k}" value="${c.schedule || '08:00'}">
+            <input type="time" class="form-control" id="cfg_time_${k}" value="${escapeHtml(c.schedule || '08:00')}">
           </div>
           <div class="form-group">
             <label>Liều Lượng (viên / lần)</label>
@@ -365,7 +414,7 @@ function renderConfigModalForm() {
           </div>
           <div class="form-group">
             <label>Số Lượng Tồn Kho (viên)</label>
-            <input type="number" min="0" max="100" class="form-control" id="cfg_stock_${k}" value="${c.currentStock || 0}">
+            <input type="number" min="0" max="100" class="form-control" id="cfg_stock_${k}" value="${stock}">
           </div>
           <div class="form-group">
             <label>Trạng Thái Nạp Thuốc</label>
@@ -386,22 +435,78 @@ btnSaveConfig.addEventListener('click', async () => {
   btnSaveConfig.disabled = true;
   btnSaveConfig.textContent = 'Đang lưu dữ liệu...';
 
-  const updatedComps = {};
+  const updates = {};
+  let stockCommandCount = 0;
+  let validationError = '';
   ['A', 'B', 'C'].forEach(k => {
-    updatedComps[k] = {
+    const displayName = document.getElementById(`cfg_name_${k}`).value.trim();
+    const medicineCode = document.getElementById(`cfg_code_${k}`).value.trim();
+    const schedule = document.getElementById(`cfg_time_${k}`).value;
+    const unitsPerDose = Number(document.getElementById(`cfg_dose_${k}`).value);
+    const stockText = document.getElementById(`cfg_stock_${k}`).value.trim();
+    const currentStock = stockText === '' ? NaN : Number(stockText);
+    const isLoaded = document.getElementById(`cfg_loaded_${k}`).value === 'true';
+
+    if (!displayName || displayName.length > 31) validationError = `Tên thuốc ngăn ${k} phải có 1–31 ký tự.`;
+    else if (!medicineCode || medicineCode.length > 15) validationError = `Mã thuốc ngăn ${k} phải có 1–15 ký tự.`;
+    else if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(schedule)) validationError = `Giờ uống ngăn ${k} không hợp lệ.`;
+    else if (!Number.isInteger(unitsPerDose) || unitsPerDose < 1 || unitsPerDose > 10) validationError = `Liều ngăn ${k} phải từ 1 đến 10 viên.`;
+    else if (!Number.isInteger(currentStock) || currentStock < 0 || currentStock > 100) validationError = `Tồn kho ngăn ${k} phải từ 0 đến 100 viên.`;
+
+    const updatedConfig = {
       compartmentId: k,
-      displayName: document.getElementById(`cfg_name_${k}`).value,
-      medicineCode: document.getElementById(`cfg_code_${k}`).value,
-      schedule: document.getElementById(`cfg_time_${k}`).value,
-      unitsPerDose: parseInt(document.getElementById(`cfg_dose_${k}`).value, 10) || 1,
-      currentStock: parseInt(document.getElementById(`cfg_stock_${k}`).value, 10) || 0,
-      isLoaded: document.getElementById(`cfg_loaded_${k}`).value === 'true'
+      displayName,
+      medicineCode,
+      schedule,
+      unitsPerDose,
+      isLoaded
     };
+
+    Object.entries(updatedConfig).forEach(([field, value]) => {
+      updates[`config/compartments/${k}/${field}`] = value;
+    });
+
+    // Chỉ gửi lệnh tồn kho khi người dùng thật sự đổi số trong form.
+    // Giá trị ban đầu được chụp lúc mở modal để tránh gửi nhầm dữ liệu cũ.
+    if (Number.isInteger(currentStock) && currentStock !== modalInitialStock[k]) {
+      const commandRef = db.ref('inventoryCommands/pending').push();
+      const commandId = commandRef.key;
+      updates[`inventoryCommands/pending/${commandId}`] = {
+        commandId,
+        compartmentId: k,
+        targetStock: currentStock,
+        createdAt: firebase.database.ServerValue.TIMESTAMP
+      };
+      updates[`inventoryCommands/status/${k}`] = {
+        commandId,
+        compartmentId: k,
+        state: 'pending',
+        targetStock: currentStock,
+        message: 'Đang chờ ESP32 xác nhận.',
+        updatedAt: firebase.database.ServerValue.TIMESTAMP
+      };
+      stockCommandCount++;
+    }
   });
 
+  if (validationError) {
+    alert(validationError);
+    btnSaveConfig.disabled = false;
+    btnSaveConfig.innerHTML = `
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="20 6 9 17 4 12"/>
+      </svg>
+      Lưu thay đổi
+    `;
+    return;
+  }
+
   try {
-    await db.ref('config/compartments').set(updatedComps);
-    alert('Cấu hình lịch uống thuốc đã được cập nhật thành công lên hệ thống.');
+    await db.ref().update(updates);
+    const stockMessage = stockCommandCount
+      ? ` Đã gửi ${stockCommandCount} yêu cầu chỉnh tồn kho; Dashboard sẽ cập nhật khi ESP32 xác nhận.`
+      : '';
+    alert(`Cấu hình đã được lưu lên Firebase.${stockMessage} Việc lưu thành công chưa có nghĩa là ESP32 đã áp dụng cấu hình lịch.`);
     configModal.classList.remove('open');
   } catch (err) {
     alert('Lỗi cập nhật cấu hình: ' + err.message);

@@ -4,10 +4,8 @@
 // Danh sách 3 ngăn thuốc cố định
 static MedicationCompartment compartments[NUM_COMPARTMENTS];
 
-// Biến lưu trữ chống kích hoạt trùng lặp trong cùng 1 phút
-static int8_t lastTriggerHour = -1;
-static int8_t lastTriggerMinute = -1;
-static char lastTriggerCompId[4] = "";
+// Khóa kích hoạt độc lập cho từng ngăn trong ngày địa phương.
+static uint32_t lastTriggerDateKey[NUM_COMPARTMENTS] = {};
 
 // Quản lý trạng thái Snooze
 static MedicationCompartment* snoozedComp = NULL;
@@ -72,7 +70,8 @@ bool schedule_updateCompartment(const MedicationCompartment &comp) {
     return false;
 }
 
-MedicationCompartment* schedule_checkDue(uint8_t currentHour, uint8_t currentMinute) {
+MedicationCompartment* schedule_checkDue(uint8_t currentHour, uint8_t currentMinute, uint32_t dateKey) {
+    if (dateKey == 0) return NULL;
     for (int i = 0; i < NUM_COMPARTMENTS; i++) {
         // Chỉ kích hoạt nếu ngăn đã nạp thuốc
         if (!compartments[i].isLoaded) continue;
@@ -81,17 +80,12 @@ MedicationCompartment* schedule_checkDue(uint8_t currentHour, uint8_t currentMin
         if (compartments[i].scheduleHour == currentHour && 
             compartments[i].scheduleMinute == currentMinute) {
 
-            // Chống lặp: Nếu đã kích hoạt ngăn này trong đúng phút này rồi thì bỏ qua
-            if (lastTriggerHour == currentHour && 
-                lastTriggerMinute == currentMinute && 
-                strcmp(lastTriggerCompId, compartments[i].compartmentId) == 0) {
+            // Chống lặp nếu ngăn này đã được kích hoạt trong cùng ngày.
+            if (lastTriggerDateKey[i] == dateKey) {
                 return NULL;
             }
 
-            // Ghi nhận mốc kích hoạt mới
-            lastTriggerHour = currentHour;
-            lastTriggerMinute = currentMinute;
-            strncpy(lastTriggerCompId, compartments[i].compartmentId, sizeof(lastTriggerCompId));
+            lastTriggerDateKey[i] = dateKey;
 
             return &compartments[i];
         }
@@ -123,8 +117,8 @@ void schedule_clearSnooze() {
 }
 
 void schedule_resetTriggerLock() {
-    lastTriggerHour = -1;
-    lastTriggerMinute = -1;
-    lastTriggerCompId[0] = '\0';
+    for (int i = 0; i < NUM_COMPARTMENTS; i++) {
+        lastTriggerDateKey[i] = 0;
+    }
     schedule_clearSnooze();
 }

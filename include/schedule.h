@@ -18,7 +18,7 @@ bool schedule_updateCompartment(const MedicationCompartment &comp);
 
 // Kiểm tra xem thời điểm hiện tại (giờ, phút) có ngăn nào đến lịch uống không
 // Trả về con trỏ tới ngăn cần uống, hoặc NULL nếu không có ngăn nào
-MedicationCompartment* schedule_checkDue(uint8_t currentHour, uint8_t currentMinute);
+MedicationCompartment* schedule_checkDue(uint8_t currentHour, uint8_t currentMinute, uint32_t dateKey);
 
 // Kích hoạt chế độ hoãn báo thức (SNOOZE) cho ngăn hiện tại
 void schedule_triggerSnooze(MedicationCompartment* comp, unsigned long currentMillis);

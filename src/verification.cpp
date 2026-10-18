@@ -1,4 +1,5 @@
 #include "verification.h"
+#include <Arduino.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -61,7 +62,8 @@ uint8_t verify_getExpectedUnits() {
 }
 
 void verify_buildEvent(unsigned long currentTimestamp, VerificationEvent &outEvent) {
-    snprintf(outEvent.eventId, sizeof(outEvent.eventId), "EVT-%lu-%s", currentTimestamp, activeCompartmentId);
+    snprintf(outEvent.eventId, sizeof(outEvent.eventId), "EVT-%lu-%lu-%s",
+             currentTimestamp, millis(), activeCompartmentId);
     strncpy(outEvent.compartmentId, activeCompartmentId, sizeof(outEvent.compartmentId));
     strncpy(outEvent.medicineCode, activeMedicineCode, sizeof(outEvent.medicineCode));
     outEvent.expectedUnits = expectedUnits;

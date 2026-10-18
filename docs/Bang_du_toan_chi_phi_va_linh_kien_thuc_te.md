@@ -118,7 +118,7 @@ Khi chuyển từ mô phỏng **Wokwi** sang chế tạo **Phần cứng thực 
 | Sản phẩm | Mức giá tham khảo | Ưu điểm | Nhược điểm | Đánh giá áp dụng |
 |---|---|---|---|---|
 | **Củ sạc điện thoại 5V 2A + Cáp sạc** | **25.000 – 40.000 đ** | Nguồn ổn định, công suất đủ cho ESP32 + Servo quay không bị sụt áp, an toàn. | Hộp thuốc phải cắm cố định cạnh ổ điện. | ⭐⭐⭐⭐⭐ **Khuyên dùng cho buổi bảo vệ đồ án** để tránh rủi ro hết pin. |
-| **Pin 18650 (2000mAh) + Mạch sạc xả Type-C TP4056 + Mạch tăng áp XL6009/MT3608** | **55.000 – 75.000 đ** *(Cả bộ)* | Biến hộp thuốc thành thiết bị di động (Portable), mất điện lưới vẫn hoạt động 12 - 24 giờ. | Thêm chi phí, mạch dây phức tạp hơn. | ⭐⭐⭐⭐ Phù hợp làm phương án mở rộng tương lai. |
+| **Pin dự phòng + bộ sạc có power-path/UPS 5V** | **Chưa chốt** | Mục tiêu đã chọn: duy trì toàn hệ thống 4 giờ khi mất điện lưới. | Cần đo tải trung bình/cực đại, chọn pin và bộ chuyển đổi có bảo vệ, dòng đỉnh đủ cho ESP32 + servo; TP4056/boost rời không mặc nhiên bảo đảm chuyển nguồn liên tục hay thời lượng. | Chỉ chốt BOM sau khi đo trên mạch thật và nghiệm thu đủ 4 giờ. |
 
 ---
 
@@ -182,13 +182,13 @@ Nhóm có thể lựa chọn 1 trong 3 gói linh kiện sau tùy theo kinh phí 
 | 5 | Động cơ Servo MG90S (Bánh răng kim loại siêu bền) | 1 | 45.000 | 45.000 |
 | 6 | **Bộ cảm biến trọng lượng Loadcell 1kg + Mạch HX711** | 1 bộ | 50.000 | 50.000 |
 | 7 | Còi Buzzer + LED + Bộ 5 nút bấm có nắp | 1 bộ | 20.000 | 20.000 |
-| 8 | **Pin 18650 (2200mAh) + Mạch sạc bảo vệ TP4056 Type-C** | 1 bộ | 45.000 | 45.000 |
-| 9 | Mạch tăng áp mini MT3608 (Lên 5V cho Servo & Cảm biến) | 1 | 10.000 | 10.000 |
+| 8 | Bộ sạc/chuyển nguồn dự phòng 5V có power-path/UPS, dòng đỉnh phù hợp | 1 | TBD | TBD |
+| 9 | Bộ pin được sizing để đạt 4 giờ theo tải đo thực tế | 1 bộ | TBD | TBD |
 | 10 | Hộp nhựa đựng mạch chuyên dụng (kích thước 120x80x40mm) | 1 | 25.000 | 25.000 |
 | 11 | Phụ kiện, ốc vít M3, dây cắm | 1 bộ | 20.000 | 20.000 |
-| **TỔNG CỘNG** | | | | **~ 403.000 VNĐ** |
+| **TỔNG CỘNG** | | | | **~ 348.000 VNĐ + bộ pin/UPS TBD** |
 
-* **Đánh giá**: Đây là sản phẩm hoàn chỉnh nhất có thể mang đi dự thi Nghiên cứu Khoa học hoặc làm Đồ án Tốt nghiệp vì có chức năng cân khối lượng thực tế và hoạt động độc lập không cần cắm dây.
+* **Đánh giá**: Đây là sản phẩm hoàn chỉnh nhất có thể mang đi dự thi Nghiên cứu Khoa học hoặc làm Đồ án Tốt nghiệp vì có chức năng cân khối lượng thực tế. Mục tiêu pin 4 giờ cần bộ UPS/power-path được chọn theo tải đo; danh sách linh kiện hiện tại chưa xác nhận thời lượng này.
 
 ---
 

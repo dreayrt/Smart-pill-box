@@ -442,6 +442,12 @@ body {
   transition: width var(--transition-normal);
 }
 
+.stock-sync-state {
+  min-height: 1.1em;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
 /* Adherence Table Card */
 .table-card {
   padding: 0;

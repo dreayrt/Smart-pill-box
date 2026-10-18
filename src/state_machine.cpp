@@ -57,7 +57,7 @@ __attribute__((weak)) void hw_setAlarmError(bool active) {
                   active ? ANSI_RED "BẬT (Nháy đỏ dồn dập + Còi dài)" ANSI_RESET : ANSI_WHITE "TẮT" ANSI_RESET);
 }
 
-__attribute__((weak)) void hw_displayIdle(int h, int m, float t, float hmd) {}
+__attribute__((weak)) void hw_displayIdle(int h, int m, int s, bool timeValid, const char* timeSource, float t, float hmd) {}
 
 __attribute__((weak)) void hw_displayReminder(const char* comp, const char* medName, int dose) {
     Serial.printf("  " ANSI_CYAN "[MÀN HÌNH LCD]" ANSI_RESET " Dòng 1: [NGAN %s] %s\r\n", comp, medName);
@@ -91,6 +91,10 @@ __attribute__((weak)) void cloud_pushEvent(const VerificationEvent &ev) {
 
 __attribute__((weak)) void cloud_updateTelemetry(float t, float h, SystemState st) {}
 __attribute__((weak)) bool cloud_fetchCompartmentConfig(MedicationCompartment* outList, int maxCount) { return false; }
+__attribute__((weak)) void cloud_stockChanged(const char* compartmentId, uint8_t currentStock) {
+    (void)compartmentId;
+    (void)currentStock;
+}
 
 // =========================================================================
 // TRIỂN KHAI CỖ MÁY TRẠNG THÁI HỮU HẠN (FSM)
@@ -133,13 +137,17 @@ MedicationCompartment* fsm_getActiveCompartment() {
     return activeComp;
 }
 
-void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute, unsigned long currentMillis) {
+void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute,
+                uint32_t dateKey, uint32_t unixTime, bool timeValid,
+                unsigned long currentMillis) {
     switch (currentState) {
         // -------------------------------------------------------------
         // 1. STATE_IDLE: Chờ đến lịch uống thuốc
         // -------------------------------------------------------------
         case STATE_IDLE: {
-            MedicationCompartment* dueComp = schedule_checkDue(currentHour, currentMinute);
+            MedicationCompartment* dueComp = timeValid
+                ? schedule_checkDue(currentHour, currentMinute, dateKey)
+                : NULL;
             if (dueComp != NULL) {
                 activeComp = dueComp;
                 SystemState prevState = currentState;
@@ -190,7 +198,7 @@ void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute, uns
                 hw_setAlarmReminder(false);
                 VerificationEvent missedEv;
                 verify_start(activeComp, currentMillis);
-                verify_buildEvent(currentMillis / 1000, missedEv);
+                verify_buildEvent(unixTime, missedEv);
                 strncpy(missedEv.status, "MISSED_DOSE", sizeof(missedEv.status));
                 cloud_pushEvent(missedEv);
 
@@ -312,12 +320,13 @@ void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute, uns
                     }
                     Serial.printf("  \033[1;36m[TỒN KHO]\033[0m Ngăn %s hiện còn lại: \033[1m%d viên\033[0m\r\n", 
                                   activeComp->compartmentId, activeComp->currentStock);
+                    cloud_stockChanged(activeComp->compartmentId, activeComp->currentStock);
                 }
 
                 hw_setAlarmReminder(false); // Tắt LED Xanh sau khi đóng nắp
                 hw_setServoLock(false);      // Đóng nắp về 0°
                 VerificationEvent ev;
-                verify_buildEvent(currentMillis / 1000, ev);
+                verify_buildEvent(unixTime, ev);
                 cloud_pushEvent(ev);
 
                 SystemState prevState = currentState;
@@ -338,7 +347,7 @@ void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute, uns
             // Gửi bản ghi lỗi lên cloud 1 lần
             if (stateTimerMillis == 0) {
                 VerificationEvent errEv;
-                verify_buildEvent(currentMillis / 1000, errEv);
+                verify_buildEvent(unixTime, errEv);
                 cloud_pushEvent(errEv);
                 stateTimerMillis = currentMillis; // Đánh dấu đã gửi
             }
@@ -370,7 +379,7 @@ void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute, uns
 
 void fsm_simulateOverdose() {
     if (activeComp == NULL) {
-        MedicationCompartment* dueComp = schedule_checkDue(12, 0);
+        MedicationCompartment* dueComp = NULL;
         if (dueComp != NULL) {
             activeComp = dueComp;
         } else {
@@ -398,5 +407,30 @@ void fsm_simulateOverdose() {
     hw_setAlarmReminder(false);
     hw_setAlarmError(true);
     hw_displayResult(false, "CANH BAO: THUA LIEU!");
+}
+
+void fsm_simulateReminderForCompartment(const char* compartmentId, unsigned long currentMillis) {
+    if (currentState != STATE_IDLE) {
+        Serial.println("[TEST] Reminder simulation is available only while the system is idle.");
+        return;
+    }
+
+    MedicationCompartment* comp = schedule_getCompartmentById(compartmentId);
+    if (comp == NULL) {
+        Serial.printf("[TEST] Unknown compartment: %s\r\n", compartmentId ? compartmentId : "(null)");
+        return;
+    }
+    if (!comp->isLoaded) {
+        Serial.printf("[TEST] Compartment %s is not loaded; no reminder started.\r\n", comp->compartmentId);
+        return;
+    }
+
+    activeComp = comp;
+    reminderStartMillis = currentMillis;
+    SystemState previous = currentState;
+    currentState = STATE_REMINDER;
+    logTransition(previous, currentState, "Serial test: reminder without changing system time");
+    hw_setAlarmReminder(true);
+    hw_displayReminder(comp->compartmentId, comp->displayName, comp->unitsPerDose);
 }
 

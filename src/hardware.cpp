@@ -25,6 +25,11 @@
 #define PIN_BTN_UP       27
 #define PIN_BTN_DOWN     14
 
+// Các GPIO chưa được nối với ngoại vi trong pin map hiện tại (diagram.json).
+// Giữ riêng danh sách tường minh; không áp dụng pinMode lên toàn bộ GPIO ESP32.
+static const uint8_t UNUSED_GPIO_PINS[] = { 18, 19, 23, 34, 36, 39 };
+static const size_t NUM_UNUSED_GPIO_PINS = sizeof(UNUSED_GPIO_PINS) / sizeof(UNUSED_GPIO_PINS[0]);
+
 // =========================================================================
 // 2. CÁC ĐỐI TƯỢNG PHẦN CỨNG & BIẾN TRẠNG THÁI
 // =========================================================================
@@ -34,6 +39,7 @@ static DHT               dht(PIN_DHT, DHT22);
 static Servo             lidServo;
 
 static bool rtcAvailable = false;
+static bool rtcLostPower = true;
 static bool lcdAvailable = false;
 
 // Trạng thái chuông báo và đèn
@@ -97,11 +103,21 @@ static void lcdPrintLine(uint8_t row, const char* str) {
     lcd.print(lineBuf);
 }
 
+static void configureUnusedGpiosAsInputs() {
+    for (size_t i = 0; i < NUM_UNUSED_GPIO_PINS; i++) {
+        // INPUT không bật pull-up/pull-down và không chủ động drive mức logic.
+        pinMode(UNUSED_GPIO_PINS[i], INPUT);
+    }
+}
+
 // =========================================================================
 // 5. TRIỂN KHAI CÁC HÀM GIAO DIỆN PHẦN CỨNG (HARDWARE INTERFACE)
 // =========================================================================
 
 void hw_initAll() {
+    // Đặt các chân không dùng đã xác nhận về high-impedance trước khi khởi tạo ngoại vi.
+    configureUnusedGpiosAsInputs();
+
     // A. Khởi tạo Output
     pinMode(PIN_LED_GREEN, OUTPUT);
     digitalWrite(PIN_LED_GREEN, LOW);
@@ -143,12 +159,15 @@ void hw_initAll() {
     if (rtc.begin()) {
         rtcAvailable = true;
         if (rtc.lostPower()) {
-            rtc.adjust(DateTime(2026, 10, 12, 7, 59, 50));
+            rtcLostPower = true;
+            Serial.println("[HARDWARE] RTC mat nguon/chua duoc cai gio; cho NTP de hieu chinh.");
+        } else {
+            rtcLostPower = false;
         }
-        Serial.println("[HARDWARE] RTC DS3231: Khởi tạo thành công (0x68).");
+        Serial.println("[HARDWARE] RTC DS3231: initialized (0x68).");
     } else {
         rtcAvailable = false;
-        Serial.println("[HARDWARE] RTC DS3231: Không phản hồi (sử dụng thời gian giả lập).");
+        Serial.println("[HARDWARE] RTC DS3231: not responding; TIME_INVALID until NTP sync.");
     }
 
     // G. Khởi tạo cảm biến DHT22
@@ -282,7 +301,7 @@ void hw_setAlarmError(bool active) {
     }
 }
 
-void hw_displayIdle(int h, int m, float t, float hmd) {
+void hw_displayIdle(int h, int m, int s, bool timeValid, const char* timeSource, float t, float hmd) {
     unsigned long now = millis();
     bool tempAlert = (t > 35.0f);
     bool humidAlert = (hmd > 75.0f);
@@ -306,8 +325,13 @@ void hw_displayIdle(int h, int m, float t, float hmd) {
     // Màn hình Idle bình thường với icon đặc biệt
     char l0[17];
     char l1[17];
-    snprintf(l0, sizeof(l0), "GIO:   %02d:%02d:00\x00", h, m);
-    snprintf(l1, sizeof(l1), "T:%4.1f\x01C H:%3.0f%%\x02", t, hmd);
+    if (timeValid) {
+        snprintf(l0, sizeof(l0), "GIO:%02d:%02d:%02d", h, m, s);
+        snprintf(l1, sizeof(l1), "%-3s T:%4.1f H:%2.0f", timeSource ? timeSource : "RTC", t, hmd);
+    } else {
+        snprintf(l0, sizeof(l0), "GIO:--:--:--");
+        snprintf(l1, sizeof(l1), "NO TIME T:%4.1f", t);
+    }
 
     lcdPrintLine(0, l0);
     lcdPrintLine(1, l1);
@@ -379,12 +403,20 @@ void hw_getEnvData(float &outTemp, float &outHumid) {
     outHumid = lastHumidPct;
 }
 
-bool hw_getRTCTime(int &h, int &m, int &s) {
-    if (!rtcAvailable) return false;
+bool hw_readRTCUnixTime(uint32_t &unixTime) {
+    if (!rtcAvailable || rtcLostPower) return false;
     DateTime now = rtc.now();
-    h = now.hour();
-    m = now.minute();
-    s = now.second();
+    if (now.year() < 2024 || now.year() > 2099) return false;
+    unixTime = now.unixtime();
+    return true;
+}
+
+bool hw_setRTCUnixTime(uint32_t unixTime) {
+    if (!rtcAvailable || unixTime < 1704067200UL) return false;
+    DateTime utc(unixTime);
+    if (utc.year() < 2024 || utc.year() > 2099) return false;
+    rtc.adjust(utc);
+    rtcLostPower = false;
     return true;
 }
 
