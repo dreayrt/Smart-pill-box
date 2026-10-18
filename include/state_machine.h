@@ -6,6 +6,9 @@
 // Khởi tạo máy trạng thái
 void fsm_init();
 
+// Đưa FSM về trạng thái IDLE và giải phóng chuông/khóa để test lại ngay lập tức
+void fsm_resetToIdle();
+
 // Cập nhật chu trình FSM theo thời gian thực (gọi liên tục trong loop)
 // btn: Sự kiện phím bấm
 // currentHour, currentMinute: Giờ phút hiện tại từ RTC (hoặc giả lập)
@@ -20,3 +23,6 @@ const char* fsm_getStateName(SystemState state);
 
 // Lấy ngăn thuốc đang trong phiên xử lý (nếu có)
 MedicationCompartment* fsm_getActiveCompartment();
+
+// Giả lập ca kiểm thử uống quá liều (TC-06 Overdose) ngay lập tức
+void fsm_simulateOverdose();

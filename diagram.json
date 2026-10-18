@@ -6,80 +6,136 @@
     {
       "type": "board-esp32-devkit-c-v4",
       "id": "esp",
-      "top": 0,
+      "top": 60,
       "left": 0,
       "attrs": {}
+    },
+    {
+      "type": "wokwi-lcd1602",
+      "id": "lcd",
+      "top": -240,
+      "left": -60,
+      "attrs": { "pins": "i2c" }
+    },
+    {
+      "type": "wokwi-ds3231",
+      "id": "rtc",
+      "top": -240,
+      "left": 230,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo",
+      "top": -90,
+      "left": -220,
+      "attrs": { "label": "SERVO KHOA NGAN (D13)" }
     },
     {
       "type": "wokwi-led",
       "id": "led-green",
       "top": -80,
-      "left": 180,
+      "left": -80,
       "attrs": { "color": "green", "label": "LED NHAC (D2)" }
     },
     {
       "type": "wokwi-led",
       "id": "led-red",
       "top": -80,
-      "left": 260,
+      "left": -10,
       "attrs": { "color": "red", "label": "LED LOI (D15)" }
-    },
-    {
-      "type": "wokwi-servo",
-      "id": "servo",
-      "top": -120,
-      "left": -120,
-      "attrs": { "label": "SERVO KHOA NGAN (D13)" }
     },
     {
       "type": "wokwi-buzzer",
       "id": "buzzer",
       "top": -90,
-      "left": 60,
+      "left": 70,
       "attrs": { "label": "BUZZER (D25)" }
+    },
+    {
+      "type": "wokwi-dht22",
+      "id": "dht",
+      "top": -90,
+      "left": 180,
+      "attrs": {}
     },
     {
       "type": "wokwi-pushbutton",
       "id": "btn-take",
-      "top": 250,
-      "left": -80,
+      "top": 350,
+      "left": -180,
       "attrs": { "color": "green", "label": "TAKE (D12)" }
     },
     {
       "type": "wokwi-pushbutton",
       "id": "btn-snooze",
-      "top": 250,
-      "left": 20,
+      "top": 350,
+      "left": -70,
       "attrs": { "color": "yellow", "label": "SNOOZE (D33)" }
     },
     {
       "type": "wokwi-pushbutton",
       "id": "btn-remove",
-      "top": 250,
-      "left": 120,
+      "top": 350,
+      "left": 40,
       "attrs": { "color": "blue", "label": "REMOVE (D35)" }
     },
     {
       "type": "wokwi-pushbutton",
+      "id": "btn-load",
+      "top": 350,
+      "left": 150,
+      "attrs": { "color": "cyan", "label": "LOAD (D32)" }
+    },
+    {
+      "type": "wokwi-pushbutton",
       "id": "btn-menu",
-      "top": 250,
-      "left": 220,
+      "top": 450,
+      "left": -120,
       "attrs": { "color": "red", "label": "MENU (D26)" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn-up",
+      "top": 450,
+      "left": -10,
+      "attrs": { "color": "white", "label": "UP (D27)" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn-down",
+      "top": 450,
+      "left": 100,
+      "attrs": { "color": "grey", "label": "DOWN (D14)" }
     }
   ],
   "connections": [
     [ "esp:TX", "$serialMonitor:RX", "", [] ],
     [ "esp:RX", "$serialMonitor:TX", "", [] ],
 
+    [ "esp:21", "lcd:SDA", "green", [ "v0" ] ],
+    [ "esp:22", "lcd:SCL", "blue", [ "v0" ] ],
+    [ "esp:5V", "lcd:VCC", "red", [ "v0" ] ],
+    [ "esp:GND.1", "lcd:GND", "black", [ "v0" ] ],
+
+    [ "esp:21", "rtc:SDA", "green", [ "v0" ] ],
+    [ "esp:22", "rtc:SCL", "blue", [ "v0" ] ],
+    [ "esp:3V3", "rtc:VCC", "red", [ "v0" ] ],
+    [ "esp:GND.1", "rtc:GND", "black", [ "v0" ] ],
+
+    [ "esp:4", "dht:SDA", "orange", [ "v0" ] ],
+    [ "esp:3V3", "dht:VCC", "red", [ "v0" ] ],
+    [ "esp:GND.1", "dht:GND", "black", [ "v0" ] ],
+
+    [ "esp:13", "servo:PWM", "orange", [ "v0" ] ],
+    [ "esp:5V", "servo:V+", "red", [ "v0" ] ],
+    [ "esp:GND.2", "servo:GND", "black", [ "v0" ] ],
+
     [ "esp:2", "led-green:A", "green", [ "v0" ] ],
     [ "esp:GND.1", "led-green:C", "black", [ "v0" ] ],
 
     [ "esp:15", "led-red:A", "red", [ "v0" ] ],
     [ "esp:GND.1", "led-red:C", "black", [ "v0" ] ],
-
-    [ "esp:13", "servo:PWM", "orange", [ "v0" ] ],
-    [ "esp:5V", "servo:V+", "red", [ "v0" ] ],
-    [ "esp:GND.2", "servo:GND", "black", [ "v0" ] ],
 
     [ "esp:25", "buzzer:2", "purple", [ "v0" ] ],
     [ "esp:GND.2", "buzzer:1", "black", [ "v0" ] ],
@@ -93,8 +149,17 @@
     [ "esp:35", "btn-remove:2.1", "blue", [ "v0" ] ],
     [ "esp:GND.2", "btn-remove:1.1", "black", [ "v0" ] ],
 
+    [ "esp:32", "btn-load:2.1", "cyan", [ "v0" ] ],
+    [ "esp:GND.2", "btn-load:1.1", "black", [ "v0" ] ],
+
     [ "esp:26", "btn-menu:2.1", "red", [ "v0" ] ],
-    [ "esp:GND.2", "btn-menu:1.1", "black", [ "v0" ] ]
+    [ "esp:GND.2", "btn-menu:1.1", "black", [ "v0" ] ],
+
+    [ "esp:27", "btn-up:2.1", "white", [ "v0" ] ],
+    [ "esp:GND.2", "btn-up:1.1", "black", [ "v0" ] ],
+
+    [ "esp:14", "btn-down:2.1", "grey", [ "v0" ] ],
+    [ "esp:GND.2", "btn-down:1.1", "black", [ "v0" ] ]
   ],
   "dependencies": {}
 }

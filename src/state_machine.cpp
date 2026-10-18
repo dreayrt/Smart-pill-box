@@ -102,6 +102,15 @@ void fsm_init() {
     activeComp = NULL;
 }
 
+void fsm_resetToIdle() {
+    schedule_resetTriggerLock();
+    currentState = STATE_IDLE;
+    activeComp = NULL;
+    hw_setAlarmReminder(false);
+    hw_setAlarmError(false);
+    hw_setServoLock(false);
+}
+
 SystemState fsm_getState() {
     return currentState;
 }
@@ -231,17 +240,20 @@ void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute, uns
                 // Đủ liều hợp lệ!
                 SystemState prevState = currentState;
                 currentState = STATE_VERIFIED;
-                stateTimerMillis = currentMillis; // Bắt đầu đếm trễ 3 giây đóng nắp
+                stateTimerMillis = currentMillis; // Bắt đầu đếm trễ đóng nắp
                 logTransition(prevState, currentState, "XAC MINH DUNG SO LIEU (VERIFIED)");
 
                 // Bật LED Xanh sáng báo hiệu lấy đúng liều
                 hw_setAlarmReminder(true);
                 hw_displayResult(true, "DA LAY DU LIEU ✓");
+                Serial.printf("  \033[1;33m⏳ [CHỜ ĐÓNG NẮP %ds]\033[0m Nắp đang mở! Bấm nút REMOVE (D35) hoặc gõ phím 'R' để lấy thêm viên (Test Quá liều).\r\n", 
+                              (int)(AUTO_CLOSE_DELAY_MS / 1000));
             } 
             else if (res == VERIFY_MORE) {
                 // Uống quá liều!
                 SystemState prevState = currentState;
                 currentState = STATE_ERROR;
+                stateTimerMillis = 0; // Đặt về 0 để STATE_ERROR gửi log lên Cloud
                 logTransition(prevState, currentState, "CANH BAO: Uong qua lieu quy dinh!");
 
                 hw_setAlarmError(true);
@@ -251,6 +263,7 @@ void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute, uns
                 // Hết 60s mà thiếu hoặc không lấy!
                 SystemState prevState = currentState;
                 currentState = STATE_ERROR;
+                stateTimerMillis = 0; // Đặt về 0 để STATE_ERROR gửi log lên Cloud
                 const char* errMsg = (res == VERIFY_TIMEOUT) ? "Het 60s: Khong lay vien nao" : "Het 60s: Lay thieu lieu";
                 logTransition(prevState, currentState, errMsg);
 
@@ -261,10 +274,35 @@ void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute, uns
         }
 
         // -------------------------------------------------------------
-        // 5. STATE_VERIFIED: Lấy đúng, tự động đóng nắp sau 3s và gửi cloud
+        // 5. STATE_VERIFIED: Lấy đúng, tự động đóng nắp sau khi đếm trễ và gửi cloud
         // -------------------------------------------------------------
         case STATE_VERIFIED: {
-            if (currentMillis - stateTimerMillis >= AUTO_CLOSE_DELAY_MS) {
+            // Nếu người bệnh lấy thêm viên thuốc nữa trong khi nắp chưa kịp đóng (Quá liều)
+            if (btn == BTN_REMOVE_PRESSED) {
+                verify_onUnitRemoved();
+                SystemState prevState = currentState;
+                currentState = STATE_ERROR;
+                stateTimerMillis = 0; // Đặt về 0 để STATE_ERROR gửi log lên Cloud
+                logTransition(prevState, currentState, "CANH BAO: Uong qua lieu quy dinh (Lay them vien)!");
+
+                hw_setAlarmReminder(false);
+                hw_setAlarmError(true);
+                hw_displayResult(false, "CANH BAO: THUA LIEU!");
+                break;
+            }
+
+            unsigned long elapsed = currentMillis - stateTimerMillis;
+            if (elapsed < AUTO_CLOSE_DELAY_MS) {
+                // Đếm ngược hiển thị mỗi giây để người dùng theo dõi
+                static unsigned long lastCountdownMs = 0;
+                if (currentMillis - lastCountdownMs >= 1000UL) {
+                    lastCountdownMs = currentMillis;
+                    int remainingSec = (int)((AUTO_CLOSE_DELAY_MS - elapsed + 999) / 1000);
+                    char lineBuf[17];
+                    snprintf(lineBuf, sizeof(lineBuf), "DONG NAP: %ds...", remainingSec);
+                    hw_displayResult(true, lineBuf);
+                }
+            } else {
                 // Trừ số lượng thuốc tồn kho trong ngăn
                 if (activeComp) {
                     if (activeComp->currentStock >= activeComp->unitsPerDose) {
@@ -276,7 +314,7 @@ void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute, uns
                                   activeComp->compartmentId, activeComp->currentStock);
                 }
 
-                hw_setAlarmReminder(false); // Tắt LED Xanh sau 3 giây
+                hw_setAlarmReminder(false); // Tắt LED Xanh sau khi đóng nắp
                 hw_setServoLock(false);      // Đóng nắp về 0°
                 VerificationEvent ev;
                 verify_buildEvent(currentMillis / 1000, ev);
@@ -285,7 +323,7 @@ void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute, uns
                 SystemState prevState = currentState;
                 currentState = STATE_CLOSED;
                 stateTimerMillis = currentMillis;
-                logTransition(prevState, currentState, "Tu dong dong nap sau 3s (Closed)");
+                logTransition(prevState, currentState, "Tu dong dong nap sau thoi gian cho (Closed)");
             }
             break;
         }
@@ -329,3 +367,36 @@ void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute, uns
         }
     }
 }
+
+void fsm_simulateOverdose() {
+    if (activeComp == NULL) {
+        MedicationCompartment* dueComp = schedule_checkDue(12, 0);
+        if (dueComp != NULL) {
+            activeComp = dueComp;
+        } else {
+            MedicationCompartment* comps = schedule_getCompartments();
+            activeComp = &comps[1]; // Mặc định Ngăn B (1 viên)
+        }
+    }
+
+    // Mở nắp và kích hoạt xác minh
+    hw_setServoLock(true);
+    verify_start(activeComp, millis());
+
+    // Giả lập rơi liên tiếp 2 viên (hoặc vượt liều)
+    verify_onUnitRemoved();
+    verify_onUnitRemoved();
+
+    Serial.printf("  " ANSI_YELLOW "⚡ [CẢM BIẾN GIẢ LẬP]" ANSI_RESET " Ghi nhận rơi: " ANSI_BOLD "%d/%d viên (QUÁ LIỀU!)\r\n" ANSI_RESET,
+                  verify_getDetectedUnits(), verify_getExpectedUnits());
+
+    SystemState prevState = currentState;
+    currentState = STATE_ERROR;
+    stateTimerMillis = 0; // Đặt về 0 để STATE_ERROR gửi log lên Cloud
+    logTransition(prevState, currentState, "CANH BAO: Uong qua lieu quy dinh (Test Overdose)!");
+
+    hw_setAlarmReminder(false);
+    hw_setAlarmError(true);
+    hw_displayResult(false, "CANH BAO: THUA LIEU!");
+}
+

@@ -5,4 +5,3 @@
 .vscode/ipch
 include/credentials.h
 compile_commands.json
-

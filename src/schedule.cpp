@@ -121,3 +121,10 @@ void schedule_clearSnooze() {
     snoozedComp = NULL;
     snoozeExpiryMillis = 0;
 }
+
+void schedule_resetTriggerLock() {
+    lastTriggerHour = -1;
+    lastTriggerMinute = -1;
+    lastTriggerCompId[0] = '\0';
+    schedule_clearSnooze();
+}

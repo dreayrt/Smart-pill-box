@@ -31,3 +31,6 @@ MedicationCompartment* schedule_getSnoozedCompartment();
 
 // Xóa trạng thái hoãn sau khi đã kích hoạt lại
 void schedule_clearSnooze();
+
+// Giải phóng khóa chống lặp để cho phép test lặp lại nhiều lần
+void schedule_resetTriggerLock();
