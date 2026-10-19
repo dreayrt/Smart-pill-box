@@ -43,8 +43,8 @@ void printHelpMenu() {
     Serial.println("\033[1;36m+==============================================================+\033[0m\r\n");
 }
 
-static void simulateCompartmentSchedule(const char* compartmentId) {
-    fsm_simulateReminderForCompartment(compartmentId, millis());
+static void simulateCompartmentSchedule(const char* compartmentId, unsigned long currentMillis) {
+    fsm_simulateReminderForCompartment(compartmentId, currentMillis);
 }
 
 void setup() {
@@ -113,13 +113,13 @@ void loop() {
 
             switch (ch) {
                 case '1':
-                    simulateCompartmentSchedule("A");
+                    simulateCompartmentSchedule("A", now);
                     break;
                 case '2':
-                    simulateCompartmentSchedule("B");
+                    simulateCompartmentSchedule("B", now);
                     break;
                 case '3':
-                    simulateCompartmentSchedule("C");
+                    simulateCompartmentSchedule("C", now);
                     break;
                 case 't':
                 case 'T':

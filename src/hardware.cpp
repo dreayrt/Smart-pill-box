@@ -110,6 +110,11 @@ static void configureUnusedGpiosAsInputs() {
     }
 }
 
+static bool i2cDeviceResponds(uint8_t address) {
+    Wire.beginTransmission(address);
+    return Wire.endTransmission() == 0;
+}
+
 // =========================================================================
 // 5. TRIỂN KHAI CÁC HÀM GIAO DIỆN PHẦN CỨNG (HARDWARE INTERFACE)
 // =========================================================================
@@ -132,9 +137,10 @@ void hw_initAll() {
     lidServo.attach(PIN_SERVO, 500, 2400);
     lidServo.write(0); // Khóa nắp ban đầu ở góc 0°
 
-    // C. Khởi tạo các chân Nút bấm (INPUT_PULLUP)
+    // C. Khởi tạo các nút. GPIO35 là input-only, không có pull-up nội bộ;
+    // mạch phải có điện trở kéo ngoài 10 kΩ lên 3V3 cho nút REMOVE.
     for (int i = 0; i < NUM_BUTTONS; i++) {
-        pinMode(buttons[i].pin, INPUT_PULLUP);
+        pinMode(buttons[i].pin, buttons[i].pin == PIN_BTN_REMOVE ? INPUT : INPUT_PULLUP);
     }
 
     // D. Khởi tạo Bus I2C
@@ -425,10 +431,15 @@ void hw_runSelfTest() {
     Serial.println("\033[1;33m|   BẮT ĐẦU CHẨN ĐOÁN PHẦN CỨNG TOÀN DIỆN (HARDWARE SELF-TEST) |\033[0m");
     Serial.println("\033[1;33m+==============================================================+\033[0m");
 
-    // 1. Test LCD
+    // Các ngoại vi không có đường phản hồi điện tử chỉ được phát lệnh kiểm tra;
+    // không báo PASS nếu firmware không thể đo được kết quả vật lý.
+    const bool lcdPass = i2cDeviceResponds(0x27);
+    lcdAvailable = lcdPass;
+
+    // 1. Test LCD: xác nhận ACK I2C tại đúng địa chỉ LCD đã cấu hình.
     lcdPrintLine(0, "[TEST 1/5] LCD");
     lcdPrintLine(1, "LCD 1602 I2C OK");
-    Serial.println("  1. LCD 1602: Hiển thị ký tự & icon kiểm thử... [PASS]");
+    Serial.printf("  1. LCD 1602 (I2C 0x27): %s\r\n", lcdPass ? "[PASS]" : "[FAIL] Không nhận ACK");
     delay(1000);
 
     // 2. Test Buzzer (Phát tần số 2000Hz và 2500Hz)
@@ -436,7 +447,7 @@ void hw_runSelfTest() {
     lcdPrintLine(1, "Phat am 2 bip...");
     tone(PIN_BUZZER, 2000); delay(150); noTone(PIN_BUZZER); delay(100);
     tone(PIN_BUZZER, 2500); delay(200); noTone(PIN_BUZZER);
-    Serial.println("  2. Buzzer: Đã phát 2 tiếng bíp kiểm tra (2000Hz & 2500Hz)... [PASS]");
+    Serial.println("  2. Buzzer: Đã phát lệnh 2 tiếng bíp; cần xác nhận nghe được [KIỂM TRA THỦ CÔNG]");
     delay(800);
 
     // 3. Test Status LEDs
@@ -444,7 +455,7 @@ void hw_runSelfTest() {
     lcdPrintLine(1, "Xanh (D2), Do(15)");
     digitalWrite(PIN_LED_GREEN, HIGH); delay(400); digitalWrite(PIN_LED_GREEN, LOW);
     digitalWrite(PIN_LED_RED, HIGH);   delay(400); digitalWrite(PIN_LED_RED, LOW);
-    Serial.println("  3. LED Xanh (D2) & LED Đỏ (D15): Đã chớp tắt tuần tự... [PASS]");
+    Serial.println("  3. LED Xanh (D2) & LED Đỏ (D15): Đã phát lệnh chớp; cần xác nhận quan sát [KIỂM TRA THỦ CÔNG]");
     delay(500);
 
     // 4. Test Servo SG90
@@ -453,21 +464,42 @@ void hw_runSelfTest() {
     Serial.println("  4. Servo SG90: Mở 90°...");
     lidServo.write(90);
     delay(1000);
-    Serial.println("     Servo SG90: Đóng về 0°... [PASS]");
+    Serial.println("     Servo SG90: Đã phát lệnh đóng về 0°; cần xác nhận chuyển động [KIỂM TRA THỦ CÔNG]");
     lidServo.write(0);
     delay(500);
 
     // 5. Test Cảm biến DHT22 & RTC
     lcdPrintLine(0, "[TEST 5/5] SENSOR");
+    const float testTemp = dht.readTemperature();
+    const float testHumid = dht.readHumidity();
+    const bool dhtPass = !isnan(testTemp) && !isnan(testHumid) &&
+                         testTemp >= -40.0f && testTemp <= 80.0f &&
+                         testHumid >= 0.0f && testHumid <= 100.0f;
+    if (dhtPass) {
+        lastTempCelsius = testTemp;
+        lastHumidPct = testHumid;
+    }
+    bool rtcPass = false;
+    if (rtcAvailable) {
+        const DateTime rtcNow = rtc.now();
+        rtcPass = rtcNow.year() >= 2024 && rtcNow.year() <= 2099;
+    }
     char senBuf[17];
-    snprintf(senBuf, sizeof(senBuf), "T:%.1fC RTC:%s", lastTempCelsius, rtcAvailable ? "OK" : "NO");
+    snprintf(senBuf, sizeof(senBuf), "T:%.1fC RTC:%s", dhtPass ? testTemp : lastTempCelsius, rtcPass ? "OK" : "NO");
     lcdPrintLine(1, senBuf);
-    Serial.printf("  5. DHT22: T=%.1f°C, H=%.1f%% | RTC DS3231: %s... [PASS]\r\n", 
-                  lastTempCelsius, lastHumidPct, rtcAvailable ? "HOẠT ĐỘNG" : "KHÔNG CÓ");
+    Serial.printf("  5a. DHT22: %s (T=%.1f°C, H=%.1f%%)\r\n",
+                  dhtPass ? "[PASS]" : "[FAIL] Mẫu không hợp lệ", dhtPass ? testTemp : lastTempCelsius,
+                  dhtPass ? testHumid : lastHumidPct);
+    Serial.printf("  5b. RTC DS3231: %s\r\n", rtcPass ? "[PASS] Đọc được thời gian hợp lệ" : "[FAIL] Không phản hồi hoặc giờ chưa hợp lệ");
     delay(1200);
 
-    lcdPrintLine(0, "[SELF-TEST PASS]");
-    lcdPrintLine(1, "PHAN CUNG OK 100%");
-    Serial.println("\033[1;32m▶ KẾT QUẢ: Toàn bộ ngoại vi phần cứng hoạt động hoàn hảo 100%!\033[0m\r\n");
+    const bool measurableChecksPass = lcdPass && dhtPass && rtcPass;
+    lcdPrintLine(0, measurableChecksPass ? "[AUTO CHECK OK]" : "[AUTO CHECK FAIL]");
+    lcdPrintLine(1, "LED/COI/SERVO: XEM");
+    if (measurableChecksPass) {
+        Serial.println("\033[1;33m▶ KẾT QUẢ: Các phép đo tự động PASS; LED, còi và servo cần người vận hành xác nhận.\033[0m\r\n");
+    } else {
+        Serial.println("\033[1;31m▶ KẾT QUẢ: SELF-TEST FAIL — xem các phép đo LCD/DHT22/RTC ở trên.\033[0m\r\n");
+    }
     delay(1500);
 }

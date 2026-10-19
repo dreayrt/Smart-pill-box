@@ -8,12 +8,24 @@
 #include <sys/time.h>
 #include <time.h>
 
+#ifdef HOST_TEST
+extern time_t host_time(time_t* output);
+extern int host_settimeofday(const timeval* value, const void* timezone);
+extern tm* host_localtime_r(const time_t* value, tm* output);
+extern int host_setenv(const char* name, const char* value, int overwrite);
+extern void host_tzset();
+#define time host_time
+#define settimeofday host_settimeofday
+#define localtime_r host_localtime_r
+#define setenv host_setenv
+#define tzset host_tzset
+#endif
+
 static const time_t MIN_VALID_UNIX_TIME = 1704067200; // 2024-01-01 00:00:00 UTC
 static const unsigned long NTP_RETRY_INTERVAL_MS = 10000UL;
 
 static volatile bool ntpSyncReceived = false;
 static bool clockIsValid = false;
-static bool ntpConfigured = false;
 static bool wifiWasOnline = false;
 static TimeSource currentTimeSource = TIME_SOURCE_INVALID;
 static unsigned long lastNtpAttemptMillis = 0;
@@ -36,7 +48,6 @@ static bool setSystemTimeFromUnix(uint32_t unixTime) {
 static void requestNtpSync() {
     sntp_set_time_sync_notification_cb(onNtpTimeSync);
     configTzTime("ICT-7", "pool.ntp.org", "time.google.com", "time.cloudflare.com");
-    ntpConfigured = true;
     lastNtpAttemptMillis = millis();
     Serial.println("[TIME] Da yeu cau dong bo NTP (mui gio Viet Nam UTC+7).");
 }
@@ -66,8 +77,13 @@ void time_service_loop() {
         return;
     }
 
-    if (!wifiWasOnline || (!ntpConfigured && millis() - lastNtpAttemptMillis >= NTP_RETRY_INTERVAL_MS)) {
+    if (!wifiWasOnline) {
         wifiWasOnline = true;
+        requestNtpSync();
+    } else if (currentTimeSource != TIME_SOURCE_NTP &&
+               millis() - lastNtpAttemptMillis >= NTP_RETRY_INTERVAL_MS) {
+        // Keep retrying until a valid NTP callback is processed. A successful
+        // RTC boot must not leave the clock stuck on RTC after a transient NTP failure.
         requestNtpSync();
     }
 
@@ -113,3 +129,13 @@ const char* time_service_sourceName(TimeSource source) {
         default: return "NO TIME";
     }
 }
+
+#ifdef HOST_TEST
+void time_service_resetForTest() {
+    ntpSyncReceived = false;
+    clockIsValid = false;
+    wifiWasOnline = false;
+    currentTimeSource = TIME_SOURCE_INVALID;
+    lastNtpAttemptMillis = 0;
+}
+#endif

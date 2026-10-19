@@ -2,6 +2,8 @@
 #include "hardware_interface.h"
 #include "sync_interface.h"
 #include <Arduino.h>
+#include <stdio.h>
+#include <string.h>
 
 // Định nghĩa mã màu ANSI cho Terminal Wokwi
 #define ANSI_RESET   "\033[0m"
@@ -23,6 +25,7 @@ static MedicationCompartment* activeComp = NULL;
 // Các mốc đếm thời gian non-blocking
 static unsigned long stateTimerMillis = 0;
 static unsigned long reminderStartMillis = 0;
+static bool errorEventSent = false;
 const unsigned long REMINDER_TIMEOUT_MS = 10 * 60 * 1000UL; // 10 phút không bấm TAKE coi như Missed
 
 // Hàm in chuyển trạng thái đẹp mắt
@@ -39,6 +42,7 @@ static void logTransition(SystemState from, SystemState to, const char* reason) 
 // =========================================================================
 // MOCK FALLBACK (Hàm dự phòng yếu - Đã định dạng \r\n căn lề chuẩn)
 // =========================================================================
+#ifndef HOST_TEST
 __attribute__((weak)) void hw_initAll() {}
 __attribute__((weak)) ButtonEvent hw_getButtonEvent() { return BTN_NONE; }
 
@@ -95,6 +99,7 @@ __attribute__((weak)) void cloud_stockChanged(const char* compartmentId, uint8_t
     (void)compartmentId;
     (void)currentStock;
 }
+#endif
 
 // =========================================================================
 // TRIỂN KHAI CỖ MÁY TRẠNG THÁI HỮU HẠN (FSM)
@@ -104,12 +109,14 @@ void fsm_init() {
     schedule_init();
     currentState = STATE_IDLE;
     activeComp = NULL;
+    errorEventSent = false;
 }
 
 void fsm_resetToIdle() {
     schedule_resetTriggerLock();
     currentState = STATE_IDLE;
     activeComp = NULL;
+    errorEventSent = false;
     hw_setAlarmReminder(false);
     hw_setAlarmError(false);
     hw_setServoLock(false);
@@ -193,11 +200,12 @@ void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute,
             else if (currentMillis - reminderStartMillis >= REMINDER_TIMEOUT_MS) {
                 SystemState prevState = currentState;
                 currentState = STATE_ERROR;
+                errorEventSent = true; // Đã gửi sự kiện MISSED_DOSE bên dưới.
                 logTransition(prevState, currentState, "Qua 10 phut khong uong thuoc -> MISSED_DOSE");
 
                 hw_setAlarmReminder(false);
                 VerificationEvent missedEv;
-                verify_start(activeComp, currentMillis);
+                verify_start(activeComp, currentMillis, false);
                 verify_buildEvent(unixTime, missedEv);
                 strncpy(missedEv.status, "MISSED_DOSE", sizeof(missedEv.status));
                 cloud_pushEvent(missedEv);
@@ -261,7 +269,7 @@ void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute,
                 // Uống quá liều!
                 SystemState prevState = currentState;
                 currentState = STATE_ERROR;
-                stateTimerMillis = 0; // Đặt về 0 để STATE_ERROR gửi log lên Cloud
+                errorEventSent = false;
                 logTransition(prevState, currentState, "CANH BAO: Uong qua lieu quy dinh!");
 
                 hw_setAlarmError(true);
@@ -271,7 +279,7 @@ void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute,
                 // Hết 60s mà thiếu hoặc không lấy!
                 SystemState prevState = currentState;
                 currentState = STATE_ERROR;
-                stateTimerMillis = 0; // Đặt về 0 để STATE_ERROR gửi log lên Cloud
+                errorEventSent = false;
                 const char* errMsg = (res == VERIFY_TIMEOUT) ? "Het 60s: Khong lay vien nao" : "Het 60s: Lay thieu lieu";
                 logTransition(prevState, currentState, errMsg);
 
@@ -290,7 +298,7 @@ void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute,
                 verify_onUnitRemoved();
                 SystemState prevState = currentState;
                 currentState = STATE_ERROR;
-                stateTimerMillis = 0; // Đặt về 0 để STATE_ERROR gửi log lên Cloud
+                errorEventSent = false;
                 logTransition(prevState, currentState, "CANH BAO: Uong qua lieu quy dinh (Lay them vien)!");
 
                 hw_setAlarmReminder(false);
@@ -345,11 +353,11 @@ void fsm_update(ButtonEvent btn, uint8_t currentHour, uint8_t currentMinute,
             hw_setServoLock(false);
 
             // Gửi bản ghi lỗi lên cloud 1 lần
-            if (stateTimerMillis == 0) {
+            if (!errorEventSent) {
                 VerificationEvent errEv;
                 verify_buildEvent(unixTime, errEv);
                 cloud_pushEvent(errEv);
-                stateTimerMillis = currentMillis; // Đánh dấu đã gửi
+                errorEventSent = true;
             }
 
             // Bấm MENU để xóa lỗi thủ công
@@ -401,7 +409,7 @@ void fsm_simulateOverdose() {
 
     SystemState prevState = currentState;
     currentState = STATE_ERROR;
-    stateTimerMillis = 0; // Đặt về 0 để STATE_ERROR gửi log lên Cloud
+    errorEventSent = false;
     logTransition(prevState, currentState, "CANH BAO: Uong qua lieu quy dinh (Test Overdose)!");
 
     hw_setAlarmReminder(false);

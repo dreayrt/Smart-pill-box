@@ -10,7 +10,7 @@ static uint8_t detectedUnits = 0;
 static unsigned long startMillis = 0;
 static bool userConfirmed = false;
 
-void verify_start(const MedicationCompartment* comp, unsigned long currentMillis) {
+void verify_start(const MedicationCompartment* comp, unsigned long currentMillis, bool confirmed) {
     if (!comp) return;
 
     strncpy(activeCompartmentId, comp->compartmentId, sizeof(activeCompartmentId));
@@ -18,7 +18,7 @@ void verify_start(const MedicationCompartment* comp, unsigned long currentMillis
     expectedUnits = comp->unitsPerDose;
     detectedUnits = 0;
     startMillis = currentMillis;
-    userConfirmed = true; // Người dùng đã ấn TAKE để mở nắp
+    userConfirmed = confirmed;
 }
 
 void verify_onUnitRemoved() {

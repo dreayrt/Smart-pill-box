@@ -26,10 +26,67 @@
 // 1. CƠ CHẾ OFFLINE BUFFER (CIRCULAR QUEUE TRONG RAM)
 // =========================================================================
 static const int OFFLINE_QUEUE_SIZE = 10;
+static const uint32_t OFFLINE_QUEUE_NVS_MAGIC = 0x45565131UL;
 static VerificationEvent offlineQueue[OFFLINE_QUEUE_SIZE];
 static int queueCount = 0;
 static int queueHead = 0;
 static int queueTail = 0;
+static bool offlineQueueNvsLoaded = false;
+
+struct OfflineQueueNvsState {
+    uint32_t magic;
+    uint8_t count;
+    VerificationEvent events[OFFLINE_QUEUE_SIZE];
+};
+
+static bool saveOfflineQueueToNvs() {
+    if (!offlineQueueNvsLoaded) return false;
+    OfflineQueueNvsState saved = {};
+    saved.magic = OFFLINE_QUEUE_NVS_MAGIC;
+    saved.count = (uint8_t)queueCount;
+    for (int i = 0; i < queueCount; i++) {
+        saved.events[i] = offlineQueue[(queueHead + i) % OFFLINE_QUEUE_SIZE];
+    }
+    Preferences prefs;
+    if (!prefs.begin("pillbox", false)) return false;
+    size_t written = prefs.putBytes("eventQueue", &saved, sizeof(saved));
+    prefs.end();
+    return written == sizeof(saved);
+}
+
+static void restoreOfflineQueueFromNvs() {
+    queueCount = queueHead = queueTail = 0;
+    memset(offlineQueue, 0, sizeof(offlineQueue));
+    OfflineQueueNvsState saved = {};
+    Preferences prefs;
+    if (prefs.begin("pillbox", true)) {
+        if (prefs.getBytesLength("eventQueue") == sizeof(saved)) {
+            prefs.getBytes("eventQueue", &saved, sizeof(saved));
+        }
+        prefs.end();
+    }
+
+    bool valid = saved.magic == OFFLINE_QUEUE_NVS_MAGIC && saved.count <= OFFLINE_QUEUE_SIZE;
+    for (int i = 0; valid && i < saved.count; i++) {
+        const VerificationEvent& event = saved.events[i];
+        valid = memchr(event.eventId, '\0', sizeof(event.eventId)) != NULL &&
+                memchr(event.compartmentId, '\0', sizeof(event.compartmentId)) != NULL &&
+                memchr(event.medicineCode, '\0', sizeof(event.medicineCode)) != NULL &&
+                memchr(event.status, '\0', sizeof(event.status)) != NULL;
+    }
+    if (valid) {
+        queueCount = saved.count;
+        queueTail = queueCount % OFFLINE_QUEUE_SIZE;
+        for (int i = 0; i < queueCount; i++) offlineQueue[i] = saved.events[i];
+    }
+    offlineQueueNvsLoaded = true;
+}
+
+static bool peekOfflineEvent(VerificationEvent& outEv) {
+    if (queueCount == 0) return false;
+    outEv = offlineQueue[queueHead];
+    return true;
+}
 
 static bool enqueueOfflineEvent(const VerificationEvent &ev) {
     if (queueCount >= OFFLINE_QUEUE_SIZE) {
@@ -40,6 +97,7 @@ static bool enqueueOfflineEvent(const VerificationEvent &ev) {
     offlineQueue[queueTail] = ev;
     queueTail = (queueTail + 1) % OFFLINE_QUEUE_SIZE;
     queueCount++;
+    saveOfflineQueueToNvs();
     return true;
 }
 
@@ -48,6 +106,7 @@ static bool dequeueOfflineEvent(VerificationEvent &outEv) {
     outEv = offlineQueue[queueHead];
     queueHead = (queueHead + 1) % OFFLINE_QUEUE_SIZE;
     queueCount--;
+    saveOfflineQueueToNvs();
     return true;
 }
 
@@ -133,6 +192,7 @@ void cloud_init() {
     Serial.printf(CLOUD_ANSI_CYAN "+--------------------------------------------------------------+\r\n" CLOUD_ANSI_RESET);
 
     // Khôi phục tồn kho gần nhất trước khi bắt đầu kết nối mạng.
+    restoreOfflineQueueFromNvs();
     restoreInventoryFromNvs();
     restoreCompartmentConfigFromNvs();
 
@@ -221,6 +281,7 @@ static bool sendEventToFirebase(const VerificationEvent &ev) {
 }
 
 void cloud_pushEvent(const VerificationEvent &ev) {
+    if (!offlineQueueNvsLoaded) restoreOfflineQueueFromNvs();
     Serial.printf("\r\n  " CLOUD_ANSI_MAGENTA "☁️  [CLOUD SYNC] Đang xử lý sự kiện: %s (Ngăn %s)" CLOUD_ANSI_RESET "\r\n", 
                   ev.eventId, ev.compartmentId);
 
@@ -950,14 +1011,10 @@ void cloud_loop() {
     // 2. Nếu có mạng và còn sự kiện tồn đọng trong Offline Queue -> Tự động đẩy bù
     if (cloud_isOnline() && queueCount > 0) {
         VerificationEvent ev;
-        if (dequeueOfflineEvent(ev)) {
+        if (peekOfflineEvent(ev)) {
             Serial.printf("  " CLOUD_ANSI_CYAN "🔄 [OFFLINE SYNC] Đang đẩy bù sự kiện tồn đọng: %s (Còn %d trong Queue)" CLOUD_ANSI_RESET "\r\n", 
                           ev.eventId, queueCount);
-            bool ok = sendEventToFirebase(ev);
-            if (!ok) {
-                // Nếu đẩy lại vẫn thất bại, nạp lại vào hàng đợi
-                enqueueOfflineEvent(ev);
-            }
+            if (sendEventToFirebase(ev)) dequeueOfflineEvent(ev);
         }
     }
 
@@ -970,3 +1027,23 @@ void cloud_loop() {
         cloud_updateTelemetry(t, h, fsm_getState());
     }
 }
+
+#ifdef HOST_TEST
+void cloud_resetForTest() {
+    memset(offlineQueue, 0, sizeof(offlineQueue));
+    queueCount = queueHead = queueTail = 0;
+    lastWifiCheckMillis = 0;
+    lastTelemetryMillis = 0;
+    lastConfigPollMillis = 0;
+    isCloudReady = false;
+    wasWifiOnline = false;
+    configSyncRequested = false;
+    hasAppliedRemoteConfig = false;
+    lastCommandPollMillis = 0;
+    lastInventorySyncMillis = 0;
+    lastInventoryBootstrapMillis = 0;
+    inventoryState = {};
+    inventoryNvsLoaded = false;
+    offlineQueueNvsLoaded = false;
+}
+#endif

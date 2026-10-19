@@ -81,6 +81,13 @@
       "attrs": { "color": "blue", "label": "REMOVE (D35)" }
     },
     {
+      "type": "wokwi-resistor",
+      "id": "remove-pullup",
+      "top": 270,
+      "left": 110,
+      "attrs": { "value": "10k", "label": "PULL-UP GPIO35" }
+    },
+    {
       "type": "wokwi-pushbutton",
       "id": "btn-load",
       "top": 350,
@@ -148,6 +155,8 @@
 
     [ "esp:35", "btn-remove:2.1", "blue", [ "v0" ] ],
     [ "esp:GND.2", "btn-remove:1.1", "black", [ "v0" ] ],
+    [ "esp:35", "remove-pullup:1", "purple", [ "v0" ] ],
+    [ "remove-pullup:2", "esp:3V3", "red", [ "v0" ] ],
 
     [ "esp:32", "btn-load:2.1", "cyan", [ "v0" ] ],
     [ "esp:GND.2", "btn-load:1.1", "black", [ "v0" ] ],

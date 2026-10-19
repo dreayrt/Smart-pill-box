@@ -2,7 +2,7 @@
 #include "config.h"
 
 // Bắt đầu một phiên xác minh khi người dùng bấm nút TAKE mở ngăn
-void verify_start(const MedicationCompartment* comp, unsigned long currentMillis);
+void verify_start(const MedicationCompartment* comp, unsigned long currentMillis, bool confirmed = true);
 
 // Ghi nhận khi người dùng lấy ra 1 viên (nhấn nút REMOVE_UNIT)
 void verify_onUnitRemoved();
