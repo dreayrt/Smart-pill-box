@@ -1,0 +1,562 @@
+/* ==========================================================================
+   SMART PILL BOX - 3D DIGITAL TWIN STYLING
+   Ke thua bien mau & phong cach Medical Clean Dark Theme tu style.css
+   ========================================================================== */
+
+.sim3d-container {
+  max-width: 1560px;
+  margin: 0 auto;
+  padding: 20px 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-height: 100vh;
+}
+
+.sim3d-header {
+  padding: 14px 22px;
+}
+
+.sim3d-header .header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.btn-toggle.active {
+  background: rgba(6, 182, 212, 0.16);
+  color: var(--accent-cyan);
+  border-color: rgba(6, 182, 212, 0.5);
+  box-shadow: 0 0 14px rgba(6, 182, 212, 0.18);
+}
+
+/* Main 2-column grid */
+.sim3d-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(360px, 440px);
+  gap: 20px;
+  align-items: start;
+}
+
+/* Left column: 3D viewport card */
+.viewport-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.viewport-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.preset-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preset-btn {
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  font-family: var(--font-main);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.preset-btn:hover {
+  color: var(--text-primary);
+  border-color: rgba(6, 182, 212, 0.4);
+  background: rgba(6, 182, 212, 0.08);
+}
+
+.preset-btn.active {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(2, 132, 199, 0.25));
+  color: #ffffff;
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 12px rgba(6, 182, 212, 0.2);
+}
+
+/* Canvas container with fixed responsive height */
+.canvas-wrapper {
+  position: relative;
+  width: 100%;
+  height: 590px;
+  min-height: 440px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 42%, #2b3242 0%, #1c222e 65%, #121722 100%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+#pillboxCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+  cursor: grab;
+}
+
+#pillboxCanvas:active {
+  cursor: grabbing;
+}
+
+/* An overlay trung lap - chi hien thi duy nhat 1 man hinh LCD 1602 vat ly tren hop thuoc */
+.lcd-overlay {
+  display: none;
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  background: rgba(15, 23, 38, 0.84);
+  border: 1px solid rgba(20, 184, 166, 0.4);
+  border-radius: 12px;
+  padding: 8px 10px;
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  z-index: 5;
+}
+
+.lcd-overlay-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: #5eead4;
+  margin-bottom: 5px;
+}
+
+.lcd-screen-box {
+  background: linear-gradient(180deg, #0f3a4f 0%, #0b2b3b 100%);
+  border: 1.5px solid #1e293b;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.32;
+  color: #e0f2fe;
+  text-shadow: 0 0 6px rgba(94, 234, 212, 0.55);
+  min-width: 158px;
+  letter-spacing: 0.03em;
+  white-space: pre;
+}
+
+.viewport-hint {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  background: rgba(11, 15, 23, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  padding: 6px 10px;
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.btn3d-tooltip {
+  position: absolute;
+  display: none;
+  pointer-events: none;
+  z-index: 12;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: rgba(10, 17, 30, 0.95);
+  border: 1px solid rgba(6, 182, 212, 0.65);
+  color: #f8fafc;
+  font-size: 0.76rem;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+  transform: translate(12px, -110%);
+}
+
+.focus-banner {
+  position: absolute;
+  left: 14px;
+  bottom: 12px;
+  max-width: 390px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(6, 182, 212, 0.5);
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  z-index: 6;
+  box-shadow: var(--shadow-md);
+}
+
+.focus-banner.visible {
+  display: flex;
+}
+
+.focus-banner h4 {
+  font-size: 0.84rem;
+  color: var(--accent-cyan);
+  margin-bottom: 2px;
+}
+
+.focus-banner p {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.focus-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.focus-close-btn:hover {
+  color: #fff;
+}
+
+/* Hardware legend chips */
+.hardware-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.hw-chip:hover {
+  color: #ffffff;
+  border-color: rgba(6, 182, 212, 0.45);
+  background: rgba(6, 182, 212, 0.08);
+}
+
+.hw-chip.active {
+  color: #ffffff;
+  border-color: var(--accent-cyan);
+  background: rgba(6, 182, 212, 0.18);
+}
+
+.hw-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* Right column: Control & Telemetry panels */
+.control-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.panel-card {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.96rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.panel-title svg {
+  color: var(--accent-cyan);
+}
+
+.mini-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mini-metric {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mini-metric-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.mini-metric-val {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #ffffff;
+  font-family: var(--font-mono);
+}
+
+.mini-metric-sub {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.hw-indicators-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.hw-ind {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.ind-bulb {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #334155;
+  transition: all 0.15s ease;
+}
+
+.hw-ind.green-on {
+  border-color: rgba(16, 185, 129, 0.5);
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.hw-ind.green-on .ind-bulb {
+  background: #10b981;
+  box-shadow: 0 0 10px #10b981;
+}
+
+.hw-ind.red-on {
+  border-color: rgba(244, 63, 94, 0.55);
+  color: #fda4af;
+  background: rgba(244, 63, 94, 0.14);
+}
+
+.hw-ind.red-on .ind-bulb {
+  background: #f43f5e;
+  box-shadow: 0 0 10px #f43f5e;
+}
+
+.hw-ind.buzzer-on {
+  border-color: rgba(245, 158, 11, 0.55);
+  color: #fcd34d;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.hw-ind.buzzer-on .ind-bulb {
+  background: #f59e0b;
+  box-shadow: 0 0 10px #f59e0b;
+}
+
+/* Interactive Demo Deck */
+.deck-group-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.btn-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.btn-grid-phys {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.deck-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-family: var(--font-main);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.08s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.deck-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.deck-btn:active {
+  transform: scale(0.97);
+}
+
+.deck-btn.btn-take { border-color: rgba(16, 185, 129, 0.45); color: #6ee7b7; }
+.deck-btn.btn-remove { border-color: rgba(59, 130, 246, 0.5); color: #93c5fd; }
+.deck-btn.btn-snooze { border-color: rgba(245, 158, 11, 0.5); color: #fcd34d; }
+.deck-btn.btn-menu { border-color: rgba(244, 63, 94, 0.5); color: #fda4af; }
+.deck-btn.btn-load { border-color: rgba(6, 182, 212, 0.5); color: #67e8f9; }
+.deck-btn.btn-nav { border-color: rgba(148, 163, 184, 0.35); color: #cbd5e1; }
+.deck-btn.btn-danger {
+  background: rgba(244, 63, 94, 0.12);
+  border-color: rgba(244, 63, 94, 0.45);
+  color: #fda4af;
+}
+.deck-btn.btn-warn {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.45);
+  color: #fcd34d;
+}
+
+.demo-log-bar {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--accent-cyan);
+  background: rgba(6, 182, 212, 0.07);
+  border: 1px solid rgba(6, 182, 212, 0.22);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Stock list */
+.stock-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stock-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border-color);
+}
+
+.stock-row.active-comp {
+  border-color: var(--accent-cyan);
+  background: rgba(6, 182, 212, 0.09);
+}
+
+.stock-row-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stock-row-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.stock-row-sub {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.stock-pill-count {
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  background: rgba(6, 182, 212, 0.12);
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+/* Responsive breakpoint */
+@media (max-width: 1120px) {
+  .sim3d-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .canvas-wrapper {
+    height: 500px;
+  }
+}
+
+@media (max-width: 640px) {
+  .sim3d-container {
+    padding: 12px;
+  }
+
+  .canvas-wrapper {
+    height: 390px;
+    min-height: 340px;
+  }
+
+  .lcd-overlay {
+    transform: scale(0.86);
+    transform-origin: top left;
+  }
+
+  .btn-grid-3 {
+    grid-template-columns: 1fr;
+  }
+}

@@ -3,6 +3,7 @@
 #include "state_machine.h"
 #include "hardware_interface.h"
 #include "schedule.h"
+#include "verification.h"
 #include "time_service.h"
 #include "mqtt_settings.h"
 #include "mqtt_sync.h"
@@ -351,6 +352,9 @@ static bool sendTelemetry(float t, float h, SystemState st) {
     TimeSnapshot snapshot = {};
     const bool timeValid = time_service_getSnapshot(snapshot);
     doc["deviceId"] = DEVICE_ID;
+    MedicationCompartment* activeComp = fsm_getActiveCompartment();
+    MedicationCompartment* comps = schedule_getCompartments();
+    bool isLidOpen = (st == STATE_COMPARTMENT_OPEN || st == STATE_VERIFYING || st == STATE_VERIFIED);
     doc["online"] = true;
     doc["lastSeen"] = timeValid ? snapshot.unixTime : 0;
     doc["receivedAt"][".sv"] = "timestamp";
@@ -365,6 +369,17 @@ static bool sendTelemetry(float t, float h, SystemState st) {
     doc["rssi"] = WiFi.RSSI();
     doc["currentState"] = fsm_getStateName(st);
     doc["activeAlarm"] = (st == STATE_ERROR || st == STATE_REMINDER);
+    doc["activeCompartment"] = activeComp ? activeComp->compartmentId : "";
+    doc["medicineName"] = activeComp ? activeComp->displayName : "";
+    doc["lidOpen"] = isLidOpen;
+    doc["servoAngle"] = isLidOpen ? 90 : 0;
+    doc["detectedUnits"] = verify_getDetectedUnits();
+    doc["expectedUnits"] = activeComp ? activeComp->unitsPerDose : verify_getExpectedUnits();
+    doc["ledGreen"] = (st == STATE_REMINDER || st == STATE_VERIFIED);
+    doc["ledRed"] = (st == STATE_ERROR);
+    doc["stockA"] = comps ? comps[0].currentStock : 10;
+    doc["stockB"] = comps ? comps[1].currentStock : 20;
+    doc["stockC"] = comps ? comps[2].currentStock : 15;
 
     String payload;
     serializeJson(doc, payload);

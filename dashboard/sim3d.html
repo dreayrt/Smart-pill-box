@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Pill Box 3D Digital Twin - Mô hình Cơ Điện tử Tương tác</title>
+  <meta name="description" content="Mô hình 3D Digital Twin Hộp Đựng Thuốc Thông Minh tích hợp ESP32, Servo SG90, LCD 1602, RTC DS3231, DHT22 đồng bộ Firebase Realtime Database">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="sim3d.css">
+
+  <!-- Firebase JS SDK (Compat v9) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+  <!-- Three.js r128 & OrbitControls -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+  <div class="sim3d-container">
+    <!-- HEADER -->
+    <header class="app-header sim3d-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+            <line x1="12" y1="22.08" x2="12" y2="12"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">HỘP THUỐC THÔNG MINH 3D — DIGITAL TWIN &amp; CƠ ĐIỆN TỬ</h1>
+          <p class="brand-subtitle">Mô phỏng trực quan Cơ cấu Servo, Mạch ESP32 &amp; Đồng bộ Realtime Wokwi / Firebase</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="status-pill" id="connStatusPill">
+          <span class="pulse-dot" id="connPulse"></span>
+          <span id="connStatusText">Đang kết nối cơ sở dữ liệu...</span>
+        </div>
+
+        <button class="btn btn-outline btn-toggle" id="btnToggleXray" type="button">
+          🔍 Xem Mạch Điện Bên Trong
+        </button>
+
+        <button class="btn btn-outline btn-toggle" id="btnToggleAudio" type="button">
+          Âm thanh Buzzer: TẮT
+        </button>
+
+        <a href="index.html" class="btn btn-primary" style="text-decoration: none;">
+          ← Về Bảng Giám sát 2D
+        </a>
+      </div>
+    </header>
+
+    <!-- MAIN 2-COLUMN WORKSPACE -->
+    <main class="sim3d-grid">
+      <!-- CỘT TRÁI: KHUNG 3D VIEWPORT -->
+      <section class="card viewport-card" aria-label="Khung mô hình 3D hộp thuốc">
+        <div class="viewport-toolbar">
+          <div class="preset-bar" id="presetButtons">
+            <button class="preset-btn active" data-preset="overview" type="button">Hộp Thuốc (Sản phẩm)</button>
+            <button class="preset-btn" data-preset="front" type="button">Mặt trước (Màn hình &amp; Nút)</button>
+            <button class="preset-btn" data-preset="compartments" type="button">3 Ngăn Thuốc (A • B • C)</button>
+            <button class="preset-btn" data-preset="electronics" type="button">🔍 Soi Mạch Điện Tầng Đáy</button>
+            <button class="preset-btn" data-preset="exploded" type="button">🔧 Tách Lớp Cơ Khí (Exploded)</button>
+          </div>
+        </div>
+
+        <div class="canvas-wrapper" id="canvasContainer">
+          <canvas id="pillboxCanvas"></canvas>
+
+          <!-- Overlay Man hinh Hop thuoc -->
+          <div class="lcd-overlay">
+            <div class="lcd-overlay-label">
+              <span>Màn hình Hộp thuốc (Trực tiếp)</span>
+              <span id="lcdStatusTag">LIVE</span>
+            </div>
+            <div class="lcd-screen-box">
+              <div id="lcdLine1"> SMART PILL BOX </div>
+              <div id="lcdLine2">  V1.0 - NHOM 13 </div>
+            </div>
+          </div>
+
+          <!-- Banner chi tiết linh kiện khi click vào legend/3D -->
+          <div class="focus-banner" id="focusComponentBanner">
+            <div>
+              <h4 id="focusComponentTitle">Linh kiện</h4>
+              <p id="focusComponentDesc">Thông số chi tiết.</p>
+            </div>
+            <button class="focus-close-btn" id="btnClearFocus" type="button" aria-label="Đóng">&times;</button>
+          </div>
+
+          <div class="viewport-hint">
+            Kéo chuột xoay 360° • Cuộn để Zoom • Click trực tiếp 7 nút 3D trên hộp
+          </div>
+
+          <div class="btn3d-tooltip" id="btn3dTooltip"></div>
+        </div>
+
+        <!-- Thanh chú thích linh kiện -->
+        <div class="hardware-legend" id="hardwareLegend">
+          <button class="hw-chip" data-focus="esp32" type="button"><span class="hw-dot" style="background:#38bdf8"></span>ESP32 DevKit</button>
+          <button class="hw-chip" data-focus="servo" type="button"><span class="hw-dot" style="background:#3b82f6"></span>Servo SG90 (D13)</button>
+          <button class="hw-chip" data-focus="lcd" type="button"><span class="hw-dot" style="background:#06b6d4"></span>LCD 1602 (0x27)</button>
+          <button class="hw-chip" data-focus="rtc" type="button"><span class="hw-dot" style="background:#818cf8"></span>RTC DS3231 (0x68)</button>
+          <button class="hw-chip" data-focus="dht22" type="button"><span class="hw-dot" style="background:#e2e8f0"></span>DHT22 (D4)</button>
+          <button class="hw-chip" data-focus="buzzer" type="button"><span class="hw-dot" style="background:#a855f7"></span>Buzzer (D25)</button>
+          <button class="hw-chip" data-focus="leds" type="button"><span class="hw-dot" style="background:#10b981"></span>LED Xanh/Đỏ</button>
+          <button class="hw-chip" data-focus="buttons" type="button"><span class="hw-dot" style="background:#f59e0b"></span>7 Nút bấm</button>
+        </div>
+      </section>
+
+      <!-- CỘT PHẢI: BẢNG ĐIỀU KHIỂN & THÔNG SỐ CƠ-ĐIỆN -->
+      <aside class="control-column" aria-label="Bảng điều khiển và thông số cơ điện">
+        <!-- Khối 1: Trạng thái Cơ khí & Điện tử -->
+        <section class="card panel-card">
+          <div class="panel-header">
+            <h2 class="panel-title">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+              </svg>
+              Trạng thái Cơ khí &amp; Điện tử
+            </h2>
+            <span class="text-muted" style="font-size:0.72rem;" id="lastSeenDisplay">Đang đồng bộ...</span>
+          </div>
+
+          <div class="mini-metrics-grid">
+            <div class="mini-metric">
+              <span class="mini-metric-label">Máy trạng thái (FSM)</span>
+              <span class="mini-metric-val" id="teleState" style="color:var(--accent-cyan);">IDLE</span>
+              <span class="mini-metric-sub" id="fsmDescription">Chờ cữ thuốc tiếp theo</span>
+            </div>
+            <div class="mini-metric">
+              <span class="mini-metric-label">Servo SG90 (GPIO 13)</span>
+              <span class="mini-metric-val" id="teleServoAngle">0°</span>
+              <span class="mini-metric-sub" id="teleLidStatus">Nắp đang khóa</span>
+            </div>
+            <div class="mini-metric">
+              <span class="mini-metric-label">Ngăn hoạt động</span>
+              <span class="mini-metric-val" id="teleActiveComp">--</span>
+              <span class="mini-metric-sub" id="teleDetectedUnits">Đã lấy: 0/0 viên</span>
+            </div>
+            <div class="mini-metric">
+              <span class="mini-metric-label">Cảm biến DHT22 (D4)</span>
+              <span class="mini-metric-val"><span id="teleTemp">28.0</span>°C / <span id="teleHumid">65.0</span>%</span>
+              <span class="mini-metric-sub" id="teleEnvHint">Bảo quản an toàn (&lt; 35°C)</span>
+            </div>
+          </div>
+
+          <div class="hw-indicators-row">
+            <div class="hw-ind" id="indLedGreen"><span class="ind-bulb"></span>LED Xanh (D2)</div>
+            <div class="hw-ind" id="indLedRed"><span class="ind-bulb"></span>LED Đỏ (D15)</div>
+            <div class="hw-ind" id="indBuzzer"><span class="ind-bulb"></span>Buzzer (D25)</div>
+          </div>
+        </section>
+
+        <!-- Khối 2: Bảng Nút bấm Vật lý & Giả lập Trực tiếp -->
+        <section class="card panel-card">
+          <div class="panel-header">
+            <h2 class="panel-title">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="6" width="20" height="12" rx="2"/>
+                <path d="M6 12h.01M10 12h.01M14 12h.01M18 12h.01"/>
+              </svg>
+              Bảng Điều khiển &amp; Kiểm thử 3D
+            </h2>
+          </div>
+
+          <div>
+            <div class="deck-group-label">1. Kích hoạt lịch hẹn (Nhảy đồng hồ)</div>
+            <div class="btn-grid-3">
+              <button class="deck-btn" id="btnSim0800" type="button">08:00 Ngăn A (2v)</button>
+              <button class="deck-btn" id="btnSim1200" type="button">12:00 Ngăn B (1v)</button>
+              <button class="deck-btn" id="btnSim2000" type="button">20:00 Ngăn C (1v)</button>
+            </div>
+          </div>
+
+          <div>
+            <div class="deck-group-label">2. Cụm 7 nút vật lý trên hộp (Tương tác 2 chiều)</div>
+            <div class="btn-grid-phys">
+              <button class="deck-btn btn-take" id="btnPhysTake" type="button">TAKE (D12) — Mở nắp</button>
+              <button class="deck-btn btn-remove" id="btnPhysRemove" type="button">REMOVE (D35) — Lấy 1v</button>
+              <button class="deck-btn btn-snooze" id="btnPhysSnooze" type="button">SNOOZE (D33) — Hoãn 5p</button>
+              <button class="deck-btn btn-menu" id="btnPhysMenu" type="button">MENU (D26) — Xóa lỗi</button>
+              <button class="deck-btn btn-load" id="btnPhysLoad" type="button">LOAD (D32) — Nạp +10v</button>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                <button class="deck-btn btn-nav" id="btnPhysUp" type="button">UP (D27)</button>
+                <button class="deck-btn btn-nav" id="btnPhysDown" type="button">DOWN (D14)</button>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="deck-group-label">3. Kịch bản sự cố nhanh</div>
+            <div class="btn-grid-phys">
+              <button class="deck-btn btn-danger" id="btnTestOverdose" type="button">Test Quá liều (TC-06)</button>
+              <button class="deck-btn btn-warn" id="btnTestOverheat" type="button">Test Quá nhiệt &gt;35°C (TC-10)</button>
+            </div>
+          </div>
+
+          <div class="demo-log-bar" id="demoLogBar">Sẵn sàng: Đồng bộ trực tiếp với Firebase &amp; Wokwi.</div>
+        </section>
+
+        <!-- Khối 3: Tồn kho 3 Ngăn Thuốc -->
+        <section class="card panel-card">
+          <div class="panel-header">
+            <h2 class="panel-title">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <rect width="20" height="14" x="2" y="5" rx="2"/>
+                <path d="M2 10h20"/>
+              </svg>
+              Tồn kho 3 Ngăn (Khớp viên thuốc 3D)
+            </h2>
+          </div>
+          <div class="stock-list" id="compStockList"></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script src="firebase-config.js"></script>
+  <script src="firebase-config.local.js"></script>
+  <script src="sim3d.js"></script>
+</body>
+</html>
