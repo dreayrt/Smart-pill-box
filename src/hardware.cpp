@@ -47,8 +47,8 @@ static bool reminderAlarmActive = false;
 static bool errorAlarmActive    = false;
 
 // Bộ đệm đọc DHT22 non-blocking
-static float lastTempCelsius = 28.0f;
-static float lastHumidPct    = 65.0f;
+static float lastTempCelsius = NAN;
+static float lastHumidPct    = NAN;
 static unsigned long lastDhtReadMillis = 0;
 static unsigned long lastEnvAlertLogMs = 0;
 
@@ -235,8 +235,8 @@ void hw_update() {
         lastDhtReadMillis = now;
         float t = dht.readTemperature();
         float h = dht.readHumidity();
-        if (!isnan(t)) lastTempCelsius = t;
-        if (!isnan(h)) lastHumidPct    = h;
+        lastTempCelsius = (!isnan(t) && t >= -40.0f && t <= 80.0f) ? t : NAN;
+        lastHumidPct = (!isnan(h) && h >= 0.0f && h <= 100.0f) ? h : NAN;
 
         // Cảnh báo quá nhiệt TC-10 ra Serial nếu T > 35.0°C
         if (lastTempCelsius > 35.0f && (now - lastEnvAlertLogMs >= 5000UL)) {

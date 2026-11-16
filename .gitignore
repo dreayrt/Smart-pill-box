@@ -4,3 +4,12 @@
 .vscode/launch.json
 .vscode/ipch
 compile_commands.json
+include/credentials.h
+node_modules/
+services/.env
+services/data/
+services/secrets/
+include/mqtt_credentials.h
+dashboard/firebase-config.local.js
+dashboard/firebase-web-config.local.json
+*-debug.log

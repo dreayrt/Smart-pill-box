@@ -1,6 +1,14 @@
 # 💊 HỘP ĐỰNG THUỐC THÔNG MINH (SMART PILLBOX)
 ### HƯỚNG DẪN CÀI ĐẶT & CHẠY DỰ ÁN (GETTING STARTED & RUN GUIDE)
 
+> **Bản mở rộng Lab 6–9 ngày 16/11/2026:** Firebase Auth và rules theo vai trò đã được triển khai, kiểm chứng trên dự án thật. Backend MQTT TLS/cảnh báo và hai Node-RED đã chạy trên máy này. Telegram đã xác minh bot/chat, gửi tin kiểm tra thành công và bật cảnh báo tự động. Xem [hướng dẫn triển khai và nghiệm thu](docs/Trien_khai_phan_quyen_MQTT_NodeRED_Telegram.md). Môi trường mặc định và Wokwi dùng `esp32dev-mqtt`, thay cho REST demo cũ được mô tả ở một số mục bên dưới.
+
+Sau khi hoàn tất cấu hình trong hướng dẫn, có thể chạy toàn bộ backend và hai Node-RED bằng `npm run start:all`. Tệp riêng `services/.env` chứa mật khẩu Node-RED, thông tin bot và đường dẫn service account; không chia sẻ tệp này.
+
+Khi clone repo mới, chạy `npm ci` và `npm run setup:local` trước khi build. Setup tạo các tệp cấu hình riêng còn thiếu, gồm `include/credentials.h` từ bản mẫu; cấu hình đang có trên máy được giữ nguyên. Các tệp mật khẩu, token, khóa TLS và tài khoản dashboard được loại khỏi Git.
+
+Web chính chạy tại `http://127.0.0.1:8787`. Tài khoản Firebase Auth admin/viewer riêng của dashboard được lưu trong `services/secrets/dashboard-accounts.json`. Backend hiện dùng phiên CLI của tài khoản chủ dự án đã xác thực, chọn rõ bằng `FIREBASE_CLI_ACCOUNT` trong `.env`; không cần tải service-account key cho cách chạy cục bộ này. Hai Node-RED dùng tài khoản `viewer`/`caregiver` và mật khẩu riêng trong `.env`.
+
 > **Dự án**: IoT Hộp Đựng Thuốc Thông Minh – Mô phỏng Wokwi & ESP32  
 > **Nhóm thực hiện**: Nhóm 13  
 > **Mục tiêu**: Giám sát lịch uống thuốc, định tuyến ngăn, kiểm tra số lượng và đồng bộ dữ liệu đám mây (Firebase).
@@ -107,7 +115,7 @@ Bạn có thể dùng chuột click trực tiếp vào 4 nút bấm trên sơ đ
    - Hệ thống thông báo: **`DA LAY DU LIEU ✓`**.
    - **Đèn LED xanh bật sáng** xác nhận thành công.
    - Kho thuốc ngăn A tự động trừ số viên bằng liều đã cấu hình.
-   - Sau đúng 3 giây: Đèn xanh tắt, Servo tự quay về 0° đóng nắp, đẩy sự kiện lên Cloud và trở về chế độ chờ (`IDLE`).
+   - Sau 8 giây theo `AUTO_CLOSE_DELAY_MS`: Đèn xanh tắt, Servo quay về 0° đóng nắp, đẩy sự kiện lên Cloud và trở về chế độ chờ (`IDLE`).
 
 ### Kịch bản 2: Người bệnh đang bận – Hoãn báo thức (Snooze)
 1. Gõ **`1`** ➔ Thử chuông nhắc của Ngăn A.
@@ -132,6 +140,29 @@ Bạn có thể dùng chuột click trực tiếp vào 4 nút bấm trên sơ đ
 - Sau khi xác minh lấy thuốc thành công, ESP32 trừ liều khỏi tồn kho và đồng bộ số mới. Nút `LOAD` cộng tối đa 10 viên, giới hạn 100 viên, rồi đồng bộ. Khi mất mạng, ESP32 giữ số mới và trạng thái cần gửi lại trong NVS.
 - Cần cho phép quyền Firebase hiện có đọc/ghi các đường dẫn mới `/inventory` và `/inventoryCommands` theo cách phù hợp với cấu hình bảo mật dự án. Nếu HTTP bị từ chối, Serial Monitor sẽ ghi mã lỗi; Dashboard sẽ tiếp tục thể hiện trạng thái chưa được ESP32 xác nhận.
 - Thông báo lưu cấu hình trên web chỉ xác nhận Firebase đã nhận thay đổi; trạng thái tồn kho được hiển thị riêng theo xác nhận của thiết bị. Cấu hình giờ/liều mới có hiệu lực khi firmware nhận ở `STATE_IDLE`.
+- ESP32 công bố bản cấu hình đang chạy tại `/reportedConfig/compartments`. Dashboard so sánh với cấu hình mong muốn để hiển thị từng ngăn đã khớp hay còn chờ; bản báo cáo cũ không chứng minh thiết bị còn online.
+
+## Giám sát và lịch sử sau đối chiếu Lab 6–9
+
+- Trạng thái online của ESP32 được suy ra từ heartbeat mới nhất, với ngưỡng mất tín hiệu 15 giây. `.info/connected` chỉ phản ánh kết nối của trình duyệt đến Firebase. Dashboard dùng `receivedAt` (server timestamp, ms) và `serverTimeOffset` để theo dõi độ mới của dữ liệu.
+- `lastSeen` là Unix giây khi RTC/NTP hợp lệ, bằng 0 khi chưa có giờ. `uptimeSeconds` là số giây từ boot. Firmware không dùng uptime để tạo ngày giờ giả cho telemetry hoặc event.
+- FSM thay đổi được xếp gửi ở lần xử lý tiếp theo đủ điều kiện, tối thiểu cách lần thử gửi trước 1 giây. Cảm biến dùng dead-band 0,5°C/2 điểm % độ ẩm và heartbeat mục tiêu 5 giây. HTTPS còn chạy đồng bộ nên cần đo độ trễ thật; đây không phải cam kết loop luôn không chặn.
+- `/telemetryHistory` lưu tối đa 1.440 ô, một mẫu/phút khi có mạng và giờ hợp lệ. Dashboard có biểu đồ nhiệt/ẩm theo 15 phút, 1 giờ hoặc 24 giờ. Lịch sử môi trường chưa được đệm khi offline; khoảng mất dữ liệu trên 2 phút không được vẽ nối.
+- Nếu cảm biến chưa có mẫu hợp lệ hoặc đọc lỗi, firmware không thay bằng số mẫu mặc định; web hiển thị `--`.
+- Cấu hình Firebase cần cho phép ESP32 ghi và dashboard đọc `/reportedConfig` cùng `/telemetryHistory` theo quyền phù hợp. Hai tính năng này có thể bị từ chối nếu rules hiện tại chỉ cho phép các nhánh cũ. Chưa triển khai hay thay đổi rules trên cloud trong đợt này.
+- [Bảng đối chiếu 32 mục của bốn lab và lộ trình hoàn thiện](docs/Doi_chieu_Lab_6_7_8_9_va_hoan_thien_he_thong.md) phân biệt phần đã có, chức năng tương đương qua Firebase và yêu cầu chưa đáp ứng đúng MQTT/no-code/Rule Chain.
+
+### Kiểm tra cục bộ
+
+```powershell
+& .\tests\host\run_tests.ps1
+node .\tests\dashboard\test_dashboard.cjs
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run
+```
+
+Ngày 16/11/2026: 55 kiểm tra logic firmware, 147 kiểm tra tích hợp với mock và 26 kiểm tra dashboard đều qua. Build ESP32 thành công, RAM tĩnh 49.384/327.680 byte (15,1%), flash 1.002.169/1.310.720 byte (76,5%). Các kết quả này chưa thay thế nghiệm thu Firebase thật, Wokwi đang chạy, phần cứng và latency đầu cuối.
+
+Script `scripts/mock_push.js` gửi dữ liệu demo lên Firebase khi được chạy; phải đặt `FIREBASE_HOST` (hostname, không có `https://`) và `FIREBASE_AUTH` qua biến môi trường. Không ghi token vào mã. File `include/credentials.h` có trong `.gitignore` nhưng đã được Git theo dõi từ trước; cần xử lý riêng việc theo dõi/lịch sử trước khi chia sẻ repository.
 
 ## Đồng hồ thật và hoạt động khi mất mạng
 

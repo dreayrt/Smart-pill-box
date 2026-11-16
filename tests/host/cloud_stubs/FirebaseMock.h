@@ -13,10 +13,19 @@ struct Write {
 
 inline std::map<std::string, std::string> documents;
 inline std::vector<Write> writes;
+inline std::vector<Write> attempts;
+inline std::map<std::string, int> responseCodes;
 
 inline void clear() {
     documents.clear();
     writes.clear();
+    attempts.clear();
+    responseCodes.clear();
+}
+inline int responseCode(const std::string& method, const std::string& path, const std::string& payload = {}) {
+    attempts.push_back({method, path, payload});
+    const auto found = responseCodes.find(method + " " + path);
+    return found == responseCodes.end() ? 200 : found->second;
 }
 inline void set(const std::string& path, const std::string& json) { documents[path] = json; }
 inline std::string get(const std::string& path) {

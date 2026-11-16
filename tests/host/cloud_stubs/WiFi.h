@@ -17,6 +17,7 @@ public:
     void mode(int) {}
     void begin(const char*, const char*) {}
     void reconnect() {}
+    int RSSI() const { return -55; }
     IPAddress localIP() const { return {}; }
 private:
     int status_ = WL_CONNECTED;

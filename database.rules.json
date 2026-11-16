@@ -1,0 +1,131 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "config": {
+      "compartments": {
+        ".read": "auth != null && auth.token.pillboxId === 'pillbox-nhom13' && (auth.token.role === 'viewer' || auth.token.role === 'caregiver' || auth.token.role === 'admin')",
+        ".write": "auth != null && auth.token.pillboxId === 'pillbox-nhom13' && (auth.token.role === 'caregiver' || auth.token.role === 'admin') && newData.exists()",
+        ".validate": "newData.hasChildren(['A','B','C'])",
+        "$id": {
+          ".validate": "($id === 'A' || $id === 'B' || $id === 'C') && newData.hasChildren(['compartmentId','medicineCode','displayName','unitsPerDose','schedule','isLoaded'])",
+          "compartmentId": {
+            ".validate": "newData.isString() && newData.val() === $id"
+          },
+          "medicineCode": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 15"
+          },
+          "displayName": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 31"
+          },
+          "unitsPerDose": {
+            ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 10 && newData.val() % 1 === 0"
+          },
+          "schedule": {
+            ".validate": "newData.isString() && newData.val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/)"
+          },
+          "isLoaded": {
+            ".validate": "newData.isBoolean()"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
+    },
+    "inventoryCommands": {
+      "pending": {
+        ".read": "auth != null && auth.token.pillboxId === 'pillbox-nhom13' && (auth.token.role === 'viewer' || auth.token.role === 'caregiver' || auth.token.role === 'admin')",
+        "$commandId": {
+          ".write": "auth != null && auth.token.pillboxId === 'pillbox-nhom13' && (auth.token.role === 'caregiver' || auth.token.role === 'admin') && !data.exists() && newData.exists()",
+          ".validate": "newData.hasChildren(['commandId','compartmentId','targetStock','createdAt'])",
+          "commandId": {
+            ".validate": "newData.isString() && newData.val() === $commandId && newData.val().length <= 40"
+          },
+          "compartmentId": {
+            ".validate": "newData.val() === 'A' || newData.val() === 'B' || newData.val() === 'C'"
+          },
+          "targetStock": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100 && newData.val() % 1 === 0"
+          },
+          "createdAt": {
+            ".validate": "newData.isNumber() && newData.val() <= now + 30000 && newData.val() >= now - 60000"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      },
+      "status": {
+        ".read": "auth != null && auth.token.pillboxId === 'pillbox-nhom13' && (auth.token.role === 'viewer' || auth.token.role === 'caregiver' || auth.token.role === 'admin')",
+        "$id": {
+          ".write": "auth != null && auth.token.pillboxId === 'pillbox-nhom13' && (auth.token.role === 'caregiver' || auth.token.role === 'admin') && newData.child('state').val() === 'pending'",
+          ".validate": "($id === 'A' || $id === 'B' || $id === 'C') && newData.hasChildren(['commandId','compartmentId','state','targetStock','message','updatedAt'])",
+          "commandId": {
+            ".validate": "newData.isString() && newData.val().length <= 40"
+          },
+          "compartmentId": {
+            ".validate": "newData.val() === $id"
+          },
+          "state": {
+            ".validate": "newData.val() === 'pending'"
+          },
+          "targetStock": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100 && newData.val() % 1 === 0"
+          },
+          "message": {
+            ".validate": "newData.isString() && newData.val().length <= 200"
+          },
+          "updatedAt": {
+            ".validate": "newData.isNumber() && newData.val() <= now + 30000 && newData.val() >= now - 60000"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
+    },
+    "deviceStatus": {
+      ".read": "auth != null && auth.token.pillboxId === 'pillbox-nhom13' && (auth.token.role === 'viewer' || auth.token.role === 'caregiver' || auth.token.role === 'admin')",
+      ".write": false
+    },
+    "telemetryHistory": {
+      ".read": "auth != null && auth.token.pillboxId === 'pillbox-nhom13' && (auth.token.role === 'viewer' || auth.token.role === 'caregiver' || auth.token.role === 'admin')",
+      ".write": false
+    },
+    "reportedConfig": {
+      ".read": "auth != null && auth.token.pillboxId === 'pillbox-nhom13' && (auth.token.role === 'viewer' || auth.token.role === 'caregiver' || auth.token.role === 'admin')",
+      ".write": false
+    },
+    "configStatus": {
+      ".read": "auth != null && auth.token.pillboxId === 'pillbox-nhom13' && (auth.token.role === 'viewer' || auth.token.role === 'caregiver' || auth.token.role === 'admin')",
+      ".write": false
+    },
+    "inventory": {
+      ".read": "auth != null && auth.token.pillboxId === 'pillbox-nhom13' && (auth.token.role === 'viewer' || auth.token.role === 'caregiver' || auth.token.role === 'admin')",
+      ".write": false
+    },
+    "events": {
+      ".read": "auth != null && auth.token.pillboxId === 'pillbox-nhom13' && (auth.token.role === 'viewer' || auth.token.role === 'caregiver' || auth.token.role === 'admin')",
+      ".write": false,
+      ".indexOn": [
+        "timestamp"
+      ]
+    },
+    "alarms": {
+      ".read": "auth != null && auth.token.pillboxId === 'pillbox-nhom13' && (auth.token.role === 'viewer' || auth.token.role === 'caregiver' || auth.token.role === 'admin')",
+      ".write": false
+    },
+    "alarmEvents": {
+      ".read": "auth != null && auth.token.pillboxId === 'pillbox-nhom13' && (auth.token.role === 'viewer' || auth.token.role === 'caregiver' || auth.token.role === 'admin')",
+      ".write": false,
+      ".indexOn": [
+        "updatedAt"
+      ]
+    },
+    "notificationStatus": {
+      ".read": "auth != null && auth.token.pillboxId === 'pillbox-nhom13' && (auth.token.role === 'viewer' || auth.token.role === 'caregiver' || auth.token.role === 'admin')",
+      ".write": false
+    }
+  }
+}

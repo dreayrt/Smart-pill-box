@@ -1,5 +1,7 @@
 # Tài liệu kỹ thuật tổng hợp Hộp thuốc thông minh
 
+> Cập nhật 16/11/2026: xem [đối chiếu Lab 6–9](Doi_chieu_Lab_6_7_8_9_va_hoan_thien_he_thong.md) và [README](../README.md) cho trạng thái mã mới nhất. Nội dung bên dưới giữ mốc rà soát 18/10/2026; các nhận định về timestamp, heartbeat, ACK lịch/liều và log chỉ lưu RAM đã được thay thế bởi triển khai mới. Mã hiện có lưu hàng đợi event vào NVS; giới hạn 10 event và ghi đè khi đầy vẫn còn. Một số lỗi lịch trùng giờ/MISSED_DOSE trong bảng kế hoạch cũ cũng đã có mã sửa và kiểm thử host.
+
 | Thông tin | Nội dung |
 |---|---|
 | Dự án | Hộp thuốc thông minh IoT, Nhóm 13 |

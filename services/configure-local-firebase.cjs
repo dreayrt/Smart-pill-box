@@ -1,0 +1,12 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const [email] = process.argv.slice(2);
+if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Cần email tài khoản CLI đã đăng nhập.');
+const file = path.join(__dirname,'.env');
+let text = fs.readFileSync(file,'utf8');
+text = /^FIREBASE_CLI_ACCOUNT=/m.test(text) ? text.replace(/^FIREBASE_CLI_ACCOUNT=.*$/m,`FIREBASE_CLI_ACCOUNT=${email}`) : text+`\nFIREBASE_CLI_ACCOUNT=${email}\n`;
+fs.writeFileSync(file,text,{mode:0o600});
+const config = JSON.parse(fs.readFileSync(path.join(__dirname,'../dashboard/firebase-web-config.local.json'),'utf8'));
+if (config.projectId !== 'smart-pillbox-iot-c2775' || !config.apiKey) throw new Error('Cấu hình web không khớp dự án.');
+fs.writeFileSync(path.join(__dirname,'../dashboard/firebase-config.local.js'),`window.PILLBOX_FIREBASE_CONFIG = ${JSON.stringify(config,null,2)};\n`);
+console.log('Đã nối cấu hình web và chọn tài khoản CLI cho backend cục bộ. Không lưu mật khẩu Google hoặc sao chép OAuth token vào dự án.');

@@ -48,6 +48,18 @@ const unsigned long VERIFY_TIMEOUT_MS  = 60 * 1000UL;       // 60 giây chờ l�
 const unsigned long AUTO_CLOSE_DELAY_MS = 8 * 1000UL;      // 8 giây tự đóng nắp sau khi lấy đủ (cho người dùng kịp quan sát & test quá liều)
 const unsigned long DEBOUNCE_DELAY_MS  = 50UL;             // Lọc rung phím bấm
 
+// Hợp đồng đồng bộ với dashboard (Lab 6–8).
+const char DEVICE_ID[] = "pillbox-nhom13";
+const char DEVICE_STATUS_PATH[] = "/deviceStatus";
+const char REPORTED_CONFIG_PATH[] = "/reportedConfig";
+const char TELEMETRY_HISTORY_PATH[] = "/telemetryHistory";
+const unsigned long TELEMETRY_HEARTBEAT_MS = 5000UL;
+const unsigned long TELEMETRY_RETRY_MS = 1000UL;
+const unsigned long SENSOR_SYNC_CHECK_MS = 1000UL;
+const float TEMPERATURE_DEADBAND_C = 0.5f;
+const float HUMIDITY_DEADBAND_PCT = 2.0f;
+const uint16_t TELEMETRY_HISTORY_SLOTS = 1440; // Tối đa một mẫu/phút trong 24 giờ.
+
 // ==========================================
 // 5. CẤU TRÚC DỮ LIỆU (STRUCTS)
 // ==========================================

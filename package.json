@@ -1,0 +1,36 @@
+{
+  "name": "smart-pillbox-services",
+  "version": "1.0.0",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node --env-file-if-exists=services/.env services/server.cjs",
+    "start:all": "node --env-file=services/.env services/start-all.cjs",
+    "firebase:check": "node --env-file=services/.env services/provision.cjs",
+    "firebase:migrate": "node --env-file=services/.env services/provision.cjs --migrate",
+    "setup:local": "node services/setup-local.cjs",
+    "dashboard:viewer": "node --env-file=services/.env services/nodered/start.cjs viewer",
+    "dashboard:caregiver": "node --env-file=services/.env services/nodered/start.cjs caregiver",
+    "test": "node --test tests/services/*.test.cjs && node tests/dashboard/test_dashboard.cjs",
+    "test:rules": "firebase emulators:exec --only database --project demo-pillbox \"node --test tests/security/*.test.cjs\"",
+    "test:system": "firebase emulators:exec --only database --project demo-pillbox \"node --test tests/integration/system.test.cjs\"",
+    "test:nodered": "node --test tests/integration/nodered.test.cjs tests/integration/tls.test.cjs",
+    "telegram:configure": "node --env-file=services/.env services/telegram-configure.cjs",
+    "telegram:test": "node --env-file=services/.env services/telegram-test.cjs",
+    "user:role": "node --env-file-if-exists=services/.env services/set-role.cjs"
+  },
+  "dependencies": {
+    "aedes": "^0.51.3",
+    "bcryptjs": "^3.0.2",
+    "firebase-admin": "^13.0.0",
+    "mqtt": "^5.0.0",
+    "node-red": "^4.0.0",
+    "express": "^4.21.0",
+    "@flowfuse/node-red-dashboard": "^1.0.0"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.1",
+    "@firebase/rules-unit-testing": "^4.0.0",
+    "firebase": "^11.0.0"
+  }
+}

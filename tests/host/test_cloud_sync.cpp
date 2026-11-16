@@ -2,6 +2,7 @@
 #include "hardware_interface.h"
 #include "sync_interface.h"
 #include "time_service.h"
+#include "mqtt_sync.h"
 #include "Preferences.h"
 #include "WiFi.h"
 #include "FirebaseMock.h"
@@ -11,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <cmath>
 
 TestSerialPort Serial;
 unsigned long fakeMillis = 0;
@@ -24,6 +26,8 @@ static int ntpRequestCount = 0;
 static std::string configuredTimezone;
 static sntp_sync_callback_t ntpCallback = nullptr;
 static time_t fakeUnixTime = 0;
+static float sensorTemperature = 22.0f;
+static float sensorHumidity = 50.0f;
 
 extern void cloud_resetForTest();
 extern void time_service_resetForTest();
@@ -70,7 +74,7 @@ void hw_displayVerifying(int, int) {}
 void hw_displayResult(bool, const char*) {}
 void hw_displayCompartmentInfo(const char*, const char*, int, int, int) {}
 void hw_displayLoadResult(const char*, int, int) {}
-void hw_getEnvData(float& temperature, float& humidity) { temperature = 22; humidity = 50; }
+void hw_getEnvData(float& temperature, float& humidity) { temperature = sensorTemperature; humidity = sensorHumidity; }
 bool hw_readRTCUnixTime(uint32_t& output) {
     if (!rtcAvailable) return false;
     output = rtcUnixTime;
@@ -106,6 +110,8 @@ static void resetWorld(bool online) {
     ntpRequestCount = 0;
     configuredTimezone.clear();
     ntpCallback = nullptr;
+    sensorTemperature = 22.0f;
+    sensorHumidity = 50.0f;
     cloud_resetForTest();
     time_service_resetForTest();
     fsm_init();
@@ -515,6 +521,183 @@ static void testT12OfflineEventAndInventorySurviveResetAndReconnect() {
     CHECK(name, sentEvents == 10);
 }
 
+static int countWrites(const char* method, const char* pathPrefix) {
+    int count = 0;
+    for (const auto& write : FakeFirebase::writes) {
+        if (write.method == method && write.path.find(pathPrefix) == 0) ++count;
+    }
+    return count;
+}
+
+static void testT13TelemetryUsesUtcAndServerHeartbeat() {
+    const char* name = "T13 UTC timestamp, server heartbeat and boot state";
+    startOnlineCloud();
+    rtcAvailable = true;
+    rtcUnixTime = 1792375200UL;
+    time_service_init();
+    cloud_loop();
+    const auto* write = lastWrite("PATCH", "/deviceStatus");
+    CHECK(name, write != nullptr);
+    if (write) {
+        DynamicJsonDocument doc(1536);
+        CHECK(name, !deserializeJson(doc, write->payload));
+        CHECK(name, doc["lastSeen"].as<uint32_t>() == rtcUnixTime);
+        CHECK(name, doc["uptimeSeconds"].as<uint32_t>() == 0);
+        CHECK(name, std::strcmp(doc["receivedAt"][".sv"], "timestamp") == 0);
+        CHECK(name, std::strcmp(doc["currentState"], "IDLE") == 0);
+        CHECK(name, doc["timeValid"].as<bool>() && doc["sensorValid"].as<bool>());
+    }
+    startOnlineCloud();
+    cloud_loop();
+    DynamicJsonDocument invalid(1536);
+    CHECK(name, !deserializeJson(invalid, lastWrite("PATCH", "/deviceStatus")->payload));
+    CHECK(name, invalid["lastSeen"].as<uint32_t>() == 0 && !invalid["timeValid"].as<bool>());
+    CHECK(name, countWrites("PUT", "/telemetryHistory/") == 0);
+}
+
+static void testT14DeadbandHeartbeatAndPhysicalStateChange() {
+    const char* name = "T14 deadband suppresses noise, heartbeat and state changes are sent";
+    startOnlineCloud();
+    cloud_loop();
+    CHECK(name, countWrites("PATCH", "/deviceStatus") == 1);
+    sensorTemperature = 22.1f;
+    sensorHumidity = 50.5f;
+    fakeMillis = 1000;
+    cloud_loop();
+    CHECK(name, countWrites("PATCH", "/deviceStatus") == 1);
+    sensorTemperature = 22.6f;
+    fakeMillis = 2000;
+    cloud_loop();
+    CHECK(name, countWrites("PATCH", "/deviceStatus") == 2);
+    fakeMillis = 6999;
+    cloud_loop();
+    CHECK(name, countWrites("PATCH", "/deviceStatus") == 2);
+    fakeMillis = 7000;
+    cloud_loop();
+    CHECK(name, countWrites("PATCH", "/deviceStatus") == 3);
+    fakeMillis = 8000;
+    fsm_simulateReminderForCompartment("A", fakeMillis);
+    cloud_loop();
+    DynamicJsonDocument doc(1536);
+    CHECK(name, !deserializeJson(doc, lastWrite("PATCH", "/deviceStatus")->payload));
+    CHECK(name, std::strcmp(doc["currentState"], "REMINDER") == 0);
+    CHECK(name, doc["activeAlarm"].as<bool>());
+}
+
+static void testT15FailedPublishRetriesAndReconnectResyncs() {
+    const char* name = "T15 failed telemetry retries without flooding and reconnect resends";
+    startOnlineCloud();
+    FakeFirebase::responseCodes["PATCH /deviceStatus"] = 503;
+    cloud_loop();
+    CHECK(name, countWrites("PATCH", "/deviceStatus") == 0);
+    const size_t firstAttempts = FakeFirebase::attempts.size();
+    fakeMillis = 500;
+    cloud_loop();
+    CHECK(name, FakeFirebase::attempts.size() == firstAttempts);
+    FakeFirebase::responseCodes.clear();
+    fakeMillis = 1000;
+    cloud_loop();
+    CHECK(name, countWrites("PATCH", "/deviceStatus") == 1);
+    WiFi.setStatus(0);
+    fakeMillis = 2000;
+    cloud_loop();
+    WiFi.setStatus(WL_CONNECTED);
+    fakeMillis = 2100;
+    cloud_loop();
+    CHECK(name, countWrites("PATCH", "/deviceStatus") == 2);
+}
+
+static void testT16ReportedConfigAcknowledgesOnlyAppliedValues() {
+    const char* name = "T16 reported config ACK, retry and active session deferral";
+    startOnlineCloud();
+    FakeFirebase::responseCodes["PUT /reportedConfig"] = 403;
+    fakeMillis = 1000;
+    cloud_loop();
+    CHECK(name, lastWrite("PUT", "/reportedConfig") == nullptr);
+    FakeFirebase::responseCodes.clear();
+    fakeMillis = 2000;
+    cloud_loop();
+    CHECK(name, lastWrite("PUT", "/reportedConfig") != nullptr);
+    DynamicJsonDocument doc(3072);
+    CHECK(name, !deserializeJson(doc, lastWrite("PUT", "/reportedConfig")->payload));
+    CHECK(name, doc["compartments"]["A"]["unitsPerDose"].as<int>() == 2);
+    CHECK(name, std::strcmp(doc["compartments"]["A"]["schedule"], "08:00") == 0);
+    CHECK(name, doc["compartments"].size() == 3);
+    fsm_simulateReminderForCompartment("A", 2000);
+    FakeFirebase::set("/config/compartments", validConfig(4));
+    fakeMillis = 15000;
+    cloud_loop();
+    CHECK(name, countWrites("PUT", "/reportedConfig") == 1);
+    CHECK(name, schedule_getCompartmentById("A")->unitsPerDose == 2);
+    fsm_resetToIdle();
+    fakeMillis = 15001;
+    cloud_loop();
+    CHECK(name, !deserializeJson(doc, lastWrite("PUT", "/reportedConfig")->payload));
+    CHECK(name, doc["compartments"]["A"]["unitsPerDose"].as<int>() == 4);
+}
+
+static void testT17HistoryIsBoundedAndInvalidSensorsAreNotInvented() {
+    const char* name = "T17 history ring is bounded, invalid samples are explicit";
+    startOnlineCloud();
+    rtcAvailable = true;
+    rtcUnixTime = 1792375200UL;
+    time_service_init();
+    for (unsigned int minute = 0; minute <= TELEMETRY_HISTORY_SLOTS; ++minute) {
+        fakeUnixTime = rtcUnixTime + minute * 60UL;
+        fakeMillis = minute * 60000UL;
+        cloud_updateTelemetry(22.0f, 50.0f, STATE_IDLE);
+    }
+    int historySlots = 0;
+    for (const auto& item : FakeFirebase::documents) {
+        if (item.first.find("/telemetryHistory/") == 0) historySlots++;
+    }
+    CHECK(name, historySlots == TELEMETRY_HISTORY_SLOTS);
+    const int previousHistoryWrites = countWrites("PUT", "/telemetryHistory/");
+    cloud_updateTelemetry(NAN, NAN, STATE_IDLE);
+    CHECK(name, countWrites("PUT", "/telemetryHistory/") == previousHistoryWrites);
+    DynamicJsonDocument doc(1536);
+    CHECK(name, !deserializeJson(doc, lastWrite("PATCH", "/deviceStatus")->payload));
+    CHECK(name, !doc["sensorValid"].as<bool>());
+    CHECK(name, doc["currentTemp"].isNull() && doc["currentHumid"].isNull());
+    fakeUnixTime += 60;
+    cloud_updateTelemetry(NAN, NAN, STATE_IDLE);
+    const FakeFirebase::Write& history = FakeFirebase::writes.back();
+    CHECK(name, !deserializeJson(doc, history.payload));
+    CHECK(name, history.path.find("/telemetryHistory/") == 0);
+    CHECK(name, !doc["sensorValid"].as<bool>() && doc["temperature"].isNull());
+}
+
+static void testT18MqttConfigDefersWhileBusyAndStockIsIdempotent() {
+    const char* name = "T18 MQTT config validation, busy deferral, stock revision and durable idempotency";
+    startOnlineCloud();
+    const std::string envelope = std::string("{\"compartments\":") + validConfig(4) + "}";
+    fsm_simulateReminderForCompartment("A", 1000);
+    CHECK(name, !cloud_applyMqttConfig(envelope.c_str()));
+    CHECK(name, schedule_getCompartmentById("A")->unitsPerDose == 2);
+    fsm_resetToIdle();
+    CHECK(name, cloud_applyMqttConfig(envelope.c_str()));
+    CHECK(name, schedule_getCompartmentById("A")->unitsPerDose == 4);
+    CHECK(name, !cloud_applyMqttConfig("{\"compartments\":{\"A\":{}}}"));
+    char error[80] = {};
+    CHECK(name, !cloud_applyMqttStock("mq-cmd", "A", 50, 1000, error, sizeof(error)));
+    CHECK(name, std::strcmp(error, "INVENTORY_REVISION_CHANGED") == 0);
+    char state[3000];
+    CHECK(name, cloud_getMqttState(state, sizeof(state)));
+    DynamicJsonDocument doc(4096);
+    CHECK(name, !deserializeJson(doc, state));
+    const uint32_t revision = doc["inventory"]["A"]["revision"].as<uint32_t>();
+    CHECK(name, cloud_applyMqttStock("mq-cmd", "A", 50, revision, error, sizeof(error)));
+    CHECK(name, schedule_getCompartmentById("A")->currentStock == 50);
+    CHECK(name, cloud_applyMqttStock("mq-cmd", "A", 50, revision, error, sizeof(error)));
+    CHECK(name, cloud_getMqttState(state, sizeof(state)));
+    CHECK(name, !deserializeJson(doc, state));
+    CHECK(name, doc["inventory"]["A"]["revision"].as<uint32_t>() == revision + 1);
+    WiFi.setStatus(0);
+    cloud_resetForTest(); fsm_init(); cloud_init();
+    CHECK(name, cloud_applyMqttStock("mq-cmd", "A", 50, revision, error, sizeof(error)));
+    CHECK(name, schedule_getCompartmentById("A")->currentStock == 50);
+}
+
 int main() {
     testT01RtcThenNtpUsesIctAndUpdatesRtc();
     testT02InvalidRtcAndNtpNeverTriggersDefaultSchedule();
@@ -528,6 +711,12 @@ int main() {
     testT10InvalidRemoteConfigKeepsLastGoodConfig();
     testT11InventoryCommandAppliesAndRejectsSafely();
     testT12OfflineEventAndInventorySurviveResetAndReconnect();
+    testT13TelemetryUsesUtcAndServerHeartbeat();
+    testT14DeadbandHeartbeatAndPhysicalStateChange();
+    testT15FailedPublishRetriesAndReconnectResyncs();
+    testT16ReportedConfigAcknowledgesOnlyAppliedValues();
+    testT17HistoryIsBoundedAndInvalidSensorsAreNotInvented();
+    testT18MqttConfigDefersWhileBusyAndStockIsIdempotent();
     std::printf("%d integration checks passed; %d failed.\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

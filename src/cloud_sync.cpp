@@ -3,6 +3,9 @@
 #include "state_machine.h"
 #include "hardware_interface.h"
 #include "schedule.h"
+#include "time_service.h"
+#include "mqtt_settings.h"
+#include "mqtt_sync.h"
 
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -12,6 +15,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 // Định nghĩa mã màu ANSI cho log Serial
 #define CLOUD_ANSI_RESET   "\033[0m"
@@ -115,6 +119,17 @@ static bool dequeueOfflineEvent(VerificationEvent &outEv) {
 // =========================================================================
 static unsigned long lastWifiCheckMillis = 0;
 static unsigned long lastTelemetryMillis = 0;
+static unsigned long lastTelemetryAttemptMillis = 0;
+static unsigned long lastSensorCheckMillis = 0;
+static bool telemetryPublished = false;
+static bool telemetryAttempted = false;
+static bool forceTelemetrySync = true;
+static float lastPublishedTemp = NAN;
+static float lastPublishedHumid = NAN;
+static SystemState lastPublishedState = STATE_IDLE;
+static uint32_t lastHistoryMinute = 0;
+static bool reportedConfigDirty = false;
+static unsigned long lastReportedConfigAttemptMillis = 0;
 static unsigned long lastConfigPollMillis = 0;
 static const unsigned long CONFIG_POLL_INTERVAL_MS = 15000UL;
 static bool isCloudReady = false;
@@ -166,6 +181,8 @@ static void restoreCompartmentConfigFromNvs();
 static bool bootstrapInventoryFromFirebase();
 static bool processNextInventoryCommand();
 static void syncDirtyInventory();
+static bool publishReportedConfig();
+static bool parseCompartmentConfig(const String& response, MedicationCompartment* outList, int maxCount);
 
 // Chuẩn hóa Base URL (bỏ dấu '/' ở cuối nếu có)
 static String getNormalizedHost() {
@@ -208,6 +225,11 @@ void cloud_init() {
     }
     Serial.println();
 
+#if PILLBOX_MQTT_ENABLED
+    mqtt_sync_init();
+    return; // Secure mode uses the bridge; never send the legacy Firebase secret.
+#endif
+
     if (WiFi.status() == WL_CONNECTED) {
         isCloudReady = true;
         wasWifiOnline = true;
@@ -218,6 +240,7 @@ void cloud_init() {
         syncRemoteCompartmentConfig();
         bootstrapInventoryFromFirebase();
         syncDirtyInventory();
+        reportedConfigDirty = hasAppliedRemoteConfig;
         lastConfigPollMillis = millis();
         lastInventoryBootstrapMillis = millis();
     } else {
@@ -268,7 +291,8 @@ static bool sendEventToFirebase(const VerificationEvent &ev) {
     doc["quantityMatch"] = ev.quantityMatch;
     doc["userConfirmed"] = ev.userConfirmed;
     doc["status"] = ev.status;
-    doc["timestamp"] = ev.timestamp > 0 ? ev.timestamp : (millis() / 1000);
+    // Không dùng uptime thay cho thời điểm thực của sự kiện offline.
+    doc["timestamp"] = ev.timestamp;
 
     String payload;
     serializeJson(doc, payload);
@@ -282,6 +306,10 @@ static bool sendEventToFirebase(const VerificationEvent &ev) {
 
 void cloud_pushEvent(const VerificationEvent &ev) {
     if (!offlineQueueNvsLoaded) restoreOfflineQueueFromNvs();
+#if PILLBOX_MQTT_ENABLED
+    enqueueOfflineEvent(ev); // Keep in NVS until the bridge confirms the database write.
+    return;
+#endif
     Serial.printf("\r\n  " CLOUD_ANSI_MAGENTA "☁️  [CLOUD SYNC] Đang xử lý sự kiện: %s (Ngăn %s)" CLOUD_ANSI_RESET "\r\n", 
                   ev.eventId, ev.compartmentId);
 
@@ -305,33 +333,97 @@ void cloud_pushEvent(const VerificationEvent &ev) {
 // =========================================================================
 // 6. CẬP NHẬT TELEMETRY TRẠNG THÁI MÁY (/deviceStatus)
 // =========================================================================
-void cloud_updateTelemetry(float t, float h, SystemState st) {
-    if (!cloud_isOnline()) return;
+static bool sendTelemetry(float t, float h, SystemState st) {
+    if (!cloud_isOnline()) return false;
 
     WiFiClientSecure client;
     client.setInsecure();
     client.setTimeout(3000);
 
     HTTPClient http;
-    String url = buildFirebaseUrl("/deviceStatus");
+    String url = buildFirebaseUrl(DEVICE_STATUS_PATH);
 
-    if (!http.begin(client, url)) return;
+    if (!http.begin(client, url)) return false;
 
     http.addHeader("Content-Type", "application/json");
 
-    StaticJsonDocument<256> doc;
+    StaticJsonDocument<768> doc;
+    TimeSnapshot snapshot = {};
+    const bool timeValid = time_service_getSnapshot(snapshot);
+    doc["deviceId"] = DEVICE_ID;
     doc["online"] = true;
-    doc["lastSeen"] = millis() / 1000;
-    doc["currentTemp"] = t;
-    doc["currentHumid"] = h;
+    doc["lastSeen"] = timeValid ? snapshot.unixTime : 0;
+    doc["receivedAt"][".sv"] = "timestamp";
+    doc["uptimeSeconds"] = millis() / 1000;
+    doc["timeValid"] = timeValid;
+    doc["timeSource"] = time_service_sourceName(snapshot.source);
+    doc["sensorValid"] = isfinite(t) && isfinite(h);
+    if (isfinite(t)) doc["currentTemp"] = t;
+    else doc["currentTemp"] = nullptr;
+    if (isfinite(h)) doc["currentHumid"] = h;
+    else doc["currentHumid"] = nullptr;
+    doc["rssi"] = WiFi.RSSI();
     doc["currentState"] = fsm_getStateName(st);
     doc["activeAlarm"] = (st == STATE_ERROR || st == STATE_REMINDER);
 
     String payload;
     serializeJson(doc, payload);
 
-    http.PATCH(payload);
+    const int code = http.PATCH(payload);
     http.end();
+    return code == 200 || code == 204;
+}
+
+static void publishHistory(float t, float h) {
+    TimeSnapshot snapshot = {};
+    if (!time_service_getSnapshot(snapshot)) return;
+    const uint32_t minute = snapshot.unixTime / 60UL;
+    if (minute == lastHistoryMinute) return;
+
+    char path[64];
+    snprintf(path, sizeof(path), "%s/%04u", TELEMETRY_HISTORY_PATH,
+             (unsigned int)(minute % TELEMETRY_HISTORY_SLOTS));
+    WiFiClientSecure client;
+    client.setInsecure();
+    client.setTimeout(3000);
+    HTTPClient http;
+    if (!http.begin(client, buildFirebaseUrl(path))) return;
+    http.addHeader("Content-Type", "application/json");
+    StaticJsonDocument<256> doc;
+    doc["timestamp"] = snapshot.unixTime;
+    doc["receivedAt"][".sv"] = "timestamp";
+    doc["sensorValid"] = isfinite(t) && isfinite(h);
+    if (isfinite(t)) doc["temperature"] = t;
+    if (isfinite(h)) doc["humidity"] = h;
+    String payload;
+    serializeJson(doc, payload);
+    const int code = http.PUT(payload);
+    http.end();
+    if (code == 200 || code == 204) lastHistoryMinute = minute;
+}
+
+void cloud_updateTelemetry(float t, float h, SystemState st) {
+    lastTelemetryAttemptMillis = millis();
+    telemetryAttempted = true;
+#if PILLBOX_MQTT_ENABLED
+    if (!mqtt_sync_publishTelemetry(t, h, st)) return;
+#else
+    if (!sendTelemetry(t, h, st)) return;
+#endif
+    lastTelemetryMillis = millis();
+    lastPublishedTemp = t;
+    lastPublishedHumid = h;
+    lastPublishedState = st;
+    telemetryPublished = true;
+    forceTelemetrySync = false;
+#if !PILLBOX_MQTT_ENABLED
+    publishHistory(t, h);
+#endif
+}
+
+static bool sensorValueChanged(float current, float previous, float deadband) {
+    if (isfinite(current) != isfinite(previous)) return true;
+    return isfinite(current) && fabsf(current - previous) >= deadband;
 }
 
 // =========================================================================
@@ -712,6 +804,11 @@ bool cloud_fetchCompartmentConfig(MedicationCompartment* outList, int maxCount) 
     String response = http.getString();
     http.end();
 
+    return parseCompartmentConfig(response, outList, maxCount);
+}
+
+static bool parseCompartmentConfig(const String& response, MedicationCompartment* outList, int maxCount) {
+    if (!outList || maxCount < NUM_COMPARTMENTS) return false;
     DynamicJsonDocument doc(1536);
     DeserializationError error = deserializeJson(doc, response);
     if (error) {
@@ -831,11 +928,45 @@ static bool syncRemoteCompartmentConfig() {
     }
 
     hasAppliedRemoteConfig = true;
+    reportedConfigDirty = true;
     Serial.println("  [CLOUD SYNC] Cấu hình Firebase đã được áp dụng cho firmware.");
     if (saveCompartmentConfigToNvs()) {
         Serial.println("  [CLOUD SYNC] Da luu cau hinh lich moi nhat vao NVS de dung khi offline.");
     }
     return true;
+}
+
+// ACK là bản cấu hình thực đang chạy, độc lập với cấu hình mong muốn trên web.
+static bool publishReportedConfig() {
+    if (!hasAppliedRemoteConfig) return false;
+    WiFiClientSecure client;
+    client.setInsecure();
+    client.setTimeout(3000);
+    HTTPClient http;
+    if (!http.begin(client, buildFirebaseUrl(REPORTED_CONFIG_PATH))) return false;
+    http.addHeader("Content-Type", "application/json");
+    StaticJsonDocument<1536> doc;
+    doc["deviceId"] = DEVICE_ID;
+    doc["reportedAt"][".sv"] = "timestamp";
+    MedicationCompartment* compartments = schedule_getCompartments();
+    for (int i = 0; i < NUM_COMPARTMENTS; ++i) {
+        const MedicationCompartment& c = compartments[i];
+        JsonObject item = doc["compartments"][c.compartmentId].to<JsonObject>();
+        item["compartmentId"] = c.compartmentId;
+        item["medicineCode"] = c.medicineCode;
+        item["displayName"] = c.displayName;
+        item["unitsPerDose"] = c.unitsPerDose;
+        char schedule[6];
+        snprintf(schedule, sizeof(schedule), "%02u:%02u", c.scheduleHour, c.scheduleMinute);
+        item["schedule"] = schedule;
+        item["isLoaded"] = c.isLoaded;
+    }
+    if (doc.overflowed()) { http.end(); return false; }
+    String payload;
+    serializeJson(doc, payload);
+    const int code = http.PUT(payload);
+    http.end();
+    return code == 200 || code == 204;
 }
 
 static void syncDirtyInventory() {
@@ -964,6 +1095,33 @@ static bool processNextInventoryCommand() {
 // =========================================================================
 void cloud_loop() {
     unsigned long now = millis();
+#if PILLBOX_MQTT_ENABLED
+    if (now - lastWifiCheckMillis >= 5000UL) {
+        lastWifiCheckMillis = now;
+        if (WiFi.status() != WL_CONNECTED) WiFi.reconnect();
+    }
+    mqtt_sync_loop();
+    if (!cloud_isOnline()) { forceTelemetrySync = true; return; }
+    static unsigned long lastEventSend = 0;
+    if (now - lastEventSend >= 2000UL) {
+        lastEventSend = now;
+        VerificationEvent event;
+        if (peekOfflineEvent(event)) mqtt_sync_publishEvent(event);
+    }
+    const SystemState mqttState = fsm_getState();
+    if ((!telemetryAttempted || now - lastTelemetryAttemptMillis >= TELEMETRY_RETRY_MS) &&
+        (forceTelemetrySync || !telemetryPublished || mqttState != lastPublishedState ||
+         now - lastSensorCheckMillis >= SENSOR_SYNC_CHECK_MS || now - lastTelemetryMillis >= TELEMETRY_HEARTBEAT_MS)) {
+        lastSensorCheckMillis = now;
+        float t = NAN, h = NAN;
+        hw_getEnvData(t, h);
+        if (forceTelemetrySync || !telemetryPublished || mqttState != lastPublishedState ||
+            now - lastTelemetryMillis >= TELEMETRY_HEARTBEAT_MS ||
+            sensorValueChanged(t, lastPublishedTemp, TEMPERATURE_DEADBAND_C) ||
+            sensorValueChanged(h, lastPublishedHumid, HUMIDITY_DEADBAND_PCT)) cloud_updateTelemetry(t, h, mqttState);
+    }
+    return;
+#endif
 
     // 1. Kiểm tra tái lập kết nối Wi-Fi định kỳ nếu bị mất mạng (mỗi 5 giây)
     if (now - lastWifiCheckMillis >= 5000UL) {
@@ -976,10 +1134,15 @@ void cloud_loop() {
     bool onlineNow = cloud_isOnline();
     if (!onlineNow) {
         wasWifiOnline = false;
+        forceTelemetrySync = true;
     } else {
         if (!wasWifiOnline) {
             wasWifiOnline = true;
             configSyncRequested = true;
+            forceTelemetrySync = true;
+            reportedConfigDirty = hasAppliedRemoteConfig;
+            // Gửi lại cả tồn kho đã xác nhận sau khi nối lại mạng.
+            if (inventoryState.initialized) inventoryState.dirtyMask |= (1U << NUM_COMPARTMENTS) - 1U;
             Serial.println("  [CLOUD SYNC] Wi-Fi đã kết nối lại; yêu cầu tải cấu hình Firebase.");
         }
 
@@ -988,6 +1151,12 @@ void cloud_loop() {
             configSyncRequested = false;
             lastConfigPollMillis = now;
             syncRemoteCompartmentConfig();
+        }
+
+        if (reportedConfigDirty &&
+            now - lastReportedConfigAttemptMillis >= TELEMETRY_RETRY_MS) {
+            lastReportedConfigAttemptMillis = now;
+            if (publishReportedConfig()) reportedConfigDirty = false;
         }
 
         if (fsm_getState() == STATE_IDLE && !inventoryState.initialized &&
@@ -1018,14 +1187,107 @@ void cloud_loop() {
         }
     }
 
-    // 3. Heartbeat Telemetry định kỳ mỗi 10 giây
-    if (now - lastTelemetryMillis >= 10000UL) {
-        lastTelemetryMillis = now;
-        float t = 28.0;
-        float h = 65.0;
+    // 3. Ưu tiên đổi trạng thái; cảm biến có dead-band, heartbeat tối đa 5 giây.
+    const SystemState state = fsm_getState();
+    const bool stateChanged = !telemetryPublished || state != lastPublishedState;
+    if (onlineNow && (!telemetryAttempted ||
+        now - lastTelemetryAttemptMillis >= TELEMETRY_RETRY_MS) &&
+        (forceTelemetrySync || stateChanged || now - lastTelemetryMillis >= TELEMETRY_HEARTBEAT_MS ||
+         now - lastSensorCheckMillis >= SENSOR_SYNC_CHECK_MS)) {
+        lastSensorCheckMillis = now;
+        float t = NAN;
+        float h = NAN;
         hw_getEnvData(t, h);
-        cloud_updateTelemetry(t, h, fsm_getState());
+        if (forceTelemetrySync || stateChanged || now - lastTelemetryMillis >= TELEMETRY_HEARTBEAT_MS ||
+            sensorValueChanged(t, lastPublishedTemp, TEMPERATURE_DEADBAND_C) ||
+            sensorValueChanged(h, lastPublishedHumid, HUMIDITY_DEADBAND_PCT)) {
+            cloud_updateTelemetry(t, h, state);
+        }
     }
+}
+
+bool cloud_applyMqttConfig(const char* json) {
+    if (!json || fsm_getState() != STATE_IDLE) return false;
+    DynamicJsonDocument envelope(2304);
+    if (deserializeJson(envelope, json)) return false;
+    String serialized;
+    serializeJson(envelope["compartments"], serialized);
+    MedicationCompartment staged[NUM_COMPARTMENTS] = {};
+    if (!parseCompartmentConfig(serialized, staged, NUM_COMPARTMENTS)) return false;
+    // Seed stock only once, from the bridge's confirmed inventory, before reporting it.
+    if (!inventoryState.initialized && envelope["initialInventory"].is<JsonObject>()) {
+        InventoryNvsState saved = inventoryState;
+        for (int i = 0; i < NUM_COMPARTMENTS; ++i) {
+            JsonVariant item = envelope["initialInventory"][staged[i].compartmentId];
+            if (!item["currentStock"].is<int>() || item["currentStock"].as<int>() < 0 || item["currentStock"].as<int>() > 100) return false;
+        }
+        for (int i = 0; i < NUM_COMPARTMENTS; ++i) {
+            JsonVariant item = envelope["initialInventory"][staged[i].compartmentId];
+            inventoryState.stocks[i] = item["currentStock"].as<uint8_t>();
+            inventoryState.revisions[i] = item["revision"] | 0UL;
+        }
+        inventoryState.initialized = 1;
+        if (!saveInventoryNvs()) { inventoryState = saved; return false; }
+        for (int i = 0; i < NUM_COMPARTMENTS; ++i) schedule_getCompartments()[i].currentStock = inventoryState.stocks[i];
+    }
+    MedicationCompartment previous[NUM_COMPARTMENTS];
+    for (int i = 0; i < NUM_COMPARTMENTS; ++i) previous[i] = schedule_getCompartments()[i];
+    const bool previouslyValid = hasAppliedRemoteConfig;
+    for (int i = 0; i < NUM_COMPARTMENTS; ++i) {
+        staged[i].currentStock = schedule_getCompartments()[i].currentStock;
+        schedule_updateCompartment(staged[i]);
+    }
+    hasAppliedRemoteConfig = true;
+    if (saveCompartmentConfigToNvs()) return true;
+    for (int i = 0; i < NUM_COMPARTMENTS; ++i) schedule_updateCompartment(previous[i]);
+    hasAppliedRemoteConfig = previouslyValid;
+    return false;
+}
+
+bool cloud_applyMqttStock(const char* commandId, const char* compartmentId, int stock, uint32_t expectedRevision, char* error, size_t errorSize) {
+    const int index = compartmentIndexFromId(compartmentId);
+    const char* reason = nullptr;
+    if (fsm_getState() != STATE_IDLE) reason = "DEVICE_BUSY";
+    else if (!commandId || strlen(commandId) == 0 || strlen(commandId) >= LAST_COMMAND_ID_SIZE || index < 0 || stock < 0 || stock > 100) reason = "INVALID_COMMAND";
+    else if (strcmp(commandId, inventoryState.lastAppliedCommandId) == 0) return true;
+    else if (inventoryState.revisions[index] != expectedRevision) reason = "INVENTORY_REVISION_CHANGED";
+    if (reason) { snprintf(error, errorSize, "%s", reason); return false; }
+    const InventoryNvsState previous = inventoryState;
+    inventoryState.stocks[index] = (uint8_t)stock;
+    inventoryState.revisions[index]++;
+    inventoryState.initialized = 1;
+    snprintf(inventoryState.lastAppliedCommandId, LAST_COMMAND_ID_SIZE, "%s", commandId);
+    if (!saveInventoryNvs()) { inventoryState = previous; snprintf(error, errorSize, "NVS_WRITE_FAILED"); return false; }
+    schedule_getCompartments()[index].currentStock = (uint8_t)stock;
+    return true;
+}
+
+bool cloud_getMqttState(char* output, size_t capacity) {
+    StaticJsonDocument<2304> doc;
+    doc["deviceId"] = DEVICE_ID;
+    MedicationCompartment* compartments = schedule_getCompartments();
+    for (int i = 0; i < NUM_COMPARTMENTS; ++i) {
+        const MedicationCompartment& c = compartments[i];
+        if (hasAppliedRemoteConfig) {
+            JsonObject item = doc["compartments"][c.compartmentId].to<JsonObject>();
+            item["compartmentId"] = c.compartmentId; item["medicineCode"] = c.medicineCode;
+            item["displayName"] = c.displayName; item["unitsPerDose"] = c.unitsPerDose; item["isLoaded"] = c.isLoaded;
+            char schedule[6]; snprintf(schedule, sizeof(schedule), "%02u:%02u", c.scheduleHour, c.scheduleMinute); item["schedule"] = schedule;
+        }
+        // Before initialization, don't overwrite the cloud's stock with sample defaults.
+        if (inventoryState.initialized) {
+            doc["inventory"][c.compartmentId]["currentStock"] = c.currentStock;
+            doc["inventory"][c.compartmentId]["revision"] = inventoryState.revisions[i];
+        }
+    }
+    if (doc.overflowed() || measureJson(doc) + 1 > capacity) return false;
+    serializeJson(doc, output, capacity);
+    return true;
+}
+
+void cloud_ackMqttEvent(const char* eventId) {
+    VerificationEvent event;
+    if (eventId && peekOfflineEvent(event) && strcmp(eventId, event.eventId) == 0) dequeueOfflineEvent(event);
 }
 
 #ifdef HOST_TEST
@@ -1034,6 +1296,14 @@ void cloud_resetForTest() {
     queueCount = queueHead = queueTail = 0;
     lastWifiCheckMillis = 0;
     lastTelemetryMillis = 0;
+    lastTelemetryAttemptMillis = lastSensorCheckMillis = 0;
+    telemetryPublished = telemetryAttempted = false;
+    forceTelemetrySync = true;
+    lastPublishedTemp = lastPublishedHumid = NAN;
+    lastPublishedState = STATE_IDLE;
+    lastHistoryMinute = 0;
+    reportedConfigDirty = false;
+    lastReportedConfigAttemptMillis = 0;
     lastConfigPollMillis = 0;
     isCloudReady = false;
     wasWifiOnline = false;

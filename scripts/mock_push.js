@@ -6,8 +6,12 @@
 
 const https = require('https');
 
-const FIREBASE_HOST = "smart-pillbox-iot-c2775-default-rtdb.asia-southeast1.firebasedatabase.app";
-const FIREBASE_AUTH = "apZoYeyyPAMeJQi7F2qzD6vx8X2XyWrQIX3eGNLN";
+const FIREBASE_HOST = process.env.FIREBASE_HOST;
+const FIREBASE_AUTH = process.env.FIREBASE_AUTH;
+if (!FIREBASE_HOST || !FIREBASE_AUTH) {
+  console.error('Thiếu FIREBASE_HOST (chỉ hostname, không có https://) hoặc FIREBASE_AUTH trong biến môi trường.');
+  process.exit(1);
+}
 
 function sendFirebaseRequest(path, method, data) {
   return new Promise((resolve, reject) => {
@@ -51,6 +55,10 @@ async function runMockDemo() {
   await sendFirebaseRequest('/deviceStatus', 'PATCH', {
     online: true,
     lastSeen: now,
+    receivedAt: { '.sv': 'timestamp' },
+    deviceId: 'pillbox-nhom13-demo',
+    timeValid: true,
+    sensorValid: true,
     currentTemp: 28.5,
     currentHumid: 64.0,
     currentState: "STATE_IDLE",

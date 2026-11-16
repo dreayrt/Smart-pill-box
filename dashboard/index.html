@@ -13,6 +13,7 @@
   <!-- Firebase JS SDK (Compat v9) -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 </head>
 <body>
   <div class="app-container">
@@ -38,7 +39,7 @@
           <span id="connStatusText">Đang kết nối cơ sở dữ liệu...</span>
         </div>
 
-        <button class="btn btn-primary" id="btnOpenConfig">
+        <button class="btn btn-primary" id="btnOpenConfig" disabled>
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
             <circle cx="12" cy="12" r="3"/>
@@ -48,8 +49,26 @@
       </div>
     </header>
 
+    <section class="card auth-panel" aria-label="Tài khoản truy cập">
+      <span id="accessRole">Chưa đăng nhập</span>
+      <form id="loginForm" class="login-form">
+        <label>Email <input id="loginEmail" class="form-control" type="email" autocomplete="username" required></label>
+        <label>Mật khẩu <input id="loginPassword" class="form-control" type="password" autocomplete="current-password" required></label>
+        <button class="btn btn-primary" type="submit">Đăng nhập</button>
+      </form>
+      <button class="btn btn-outline" id="btnLogout" hidden>Đăng xuất</button>
+      <p class="text-muted" id="authMessage" role="status"></p>
+    </section>
     <!-- MAIN DASHBOARD CONTENT -->
-    <main class="dashboard-grid">
+    <main class="dashboard-grid" id="mainDashboard" hidden>
+
+      <section class="section-container" aria-label="Vòng đời cảnh báo">
+        <div class="section-header"><h2 class="section-title">Cảnh báo và phục hồi</h2></div>
+        <p class="text-muted history-note">Xác nhận đã xem không xóa sự cố. Hệ thống tự ghi phục hồi khi điều kiện trở lại bình thường.</p>
+        <div class="card" id="alarmsList" aria-live="polite">Chưa có cảnh báo.</div>
+        <p class="text-muted history-note" id="notificationSummary">Chưa có bản ghi gửi thông báo.</p>
+        <details class="card alarm-history"><summary>Nhật ký chuyển trạng thái cảnh báo</summary><div id="alarmTimeline"></div></details>
+      </section>
       
       <!-- KHỐI 1: THÔNG SỐ VẬN HÀNH THIẾT BỊ -->
       <section class="section-container" aria-label="Thông số thiết bị">
@@ -74,7 +93,7 @@
             <div class="stat-meta">
               <span class="stat-label">Nhiệt độ buồng thuốc</span>
               <div class="stat-value"><span id="teleTemp">--</span> <small>°C</small></div>
-              <span class="stat-hint" id="tempAlertHint">Tiêu chuẩn bảo quản: &lt; 35°C</span>
+              <span class="stat-hint" id="tempAlertHint">Ngưỡng demo: 35°C; xem nhãn thuốc</span>
             </div>
           </div>
 
@@ -88,7 +107,7 @@
             <div class="stat-meta">
               <span class="stat-label">Độ ẩm buồng thuốc</span>
               <div class="stat-value"><span id="teleHumid">--</span> <small>%</small></div>
-              <span class="stat-hint" id="humidAlertHint">Tiêu chuẩn bảo quản: &lt; 75%</span>
+              <span class="stat-hint" id="humidAlertHint">Ngưỡng demo độ ẩm: 75%</span>
             </div>
           </div>
 
@@ -124,6 +143,24 @@
         </div>
       </section>
 
+      <section class="section-container" aria-label="Lịch sử môi trường">
+        <div class="section-header history-header">
+          <h2 class="section-title">Lịch sử nhiệt độ và độ ẩm</h2>
+          <label>Khoảng xem
+            <select class="form-control" id="historyRange">
+              <option value="15">15 phút</option>
+              <option value="60" selected>1 giờ</option>
+              <option value="1440">24 giờ</option>
+            </select>
+          </label>
+        </div>
+        <p class="text-muted history-note" id="historySummary">Chưa nhận dữ liệu lịch sử từ ESP32.</p>
+        <div class="history-grid">
+          <div class="card history-chart" id="temperatureChart"></div>
+          <div class="card history-chart" id="humidityChart"></div>
+        </div>
+      </section>
+
       <!-- KHỐI 2: DANH SÁCH CÁC NGĂN THUỐC -->
       <section class="section-container" aria-label="Tình trạng các ngăn thuốc">
         <div class="section-header">
@@ -137,6 +174,7 @@
           <span class="text-muted" id="compCountLabel">3 ngăn chứa</span>
         </div>
 
+        <p class="text-muted history-note" id="configSyncSummary">Chưa nhận bản cấu hình ESP32 đã áp dụng.</p>
         <div class="compartments-grid" id="compartmentsContainer">
           <div class="card comp-card loading-card">
             <p class="text-muted">Đang tải thông tin các ngăn thuốc...</p>
@@ -223,6 +261,10 @@
     </div>
   </div>
 
+  <script src="firebase-config.js"></script>
+  <script src="firebase-config.local.js"></script>
+  <script src="model.js"></script>
+  <script src="access.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

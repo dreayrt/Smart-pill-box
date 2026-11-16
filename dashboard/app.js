@@ -4,13 +4,44 @@
  */
 
 // 1. Cấu hình kết nối Firebase
-const FIREBASE_CONFIG = {
-  databaseURL: "https://smart-pillbox-iot-c2775-default-rtdb.asia-southeast1.firebasedatabase.app/"
-};
+const FIREBASE_CONFIG = window.PILLBOX_FIREBASE_CONFIG;
 
 // Khởi tạo Firebase App
 firebase.initializeApp(FIREBASE_CONFIG);
 const db = firebase.database();
+const subscriptions = [];
+let attachedSubscriptions = [];
+function watchDatabase(key, callback, onError, limit) {
+  subscriptions.push({ key, callback, onError, limit });
+}
+function updateAccess(access) {
+  attachedSubscriptions.forEach(({ ref, callback }) => ref.off('value', callback));
+  attachedSubscriptions = [];
+  document.getElementById('mainDashboard').hidden = !access.canRead;
+  document.getElementById('btnOpenConfig').disabled = !access.canWrite;
+  document.getElementById('btnSaveConfig').disabled = !access.canWrite;
+  document.getElementById('configModal').classList.remove('open');
+  if (!access.canRead) {
+    currentDeviceStatus = {}; currentCompartments = {}; currentInventory = {};
+    pendingInventoryCommands = {}; inventoryCommandStatus = {}; reportedConfig = {}; historyNodes = {}; allEventsList = [];
+    compartmentsContainer.innerHTML = ''; eventsTableBody.innerHTML = '';
+    document.getElementById('alarmsList').innerHTML = '';
+    document.getElementById('alarmTimeline').innerHTML = '';
+    document.getElementById('notificationSummary').textContent = '';
+    document.getElementById('temperatureChart').innerHTML = '';
+    document.getElementById('humidityChart').innerHTML = '';
+    configFormContent.innerHTML = '';
+    teleTemp.textContent = teleHumid.textContent = '--';
+    renderConnection(); return;
+  }
+  subscriptions.forEach(item => {
+    let ref = db.ref(item.key);
+    if (item.limit) ref = ref.limitToFirst(item.limit);
+    const error = item.onError || (() => { document.getElementById('authMessage').textContent = 'Không đọc được dữ liệu. Kiểm tra quyền tài khoản và Firebase rules.'; });
+    ref.on('value', item.callback, error);
+    attachedSubscriptions.push({ ref, callback: item.callback });
+  });
+}
 
 // State cục bộ của Dashboard
 let currentCompartments = {};
@@ -20,6 +51,10 @@ let inventoryCommandStatus = {};
 let modalInitialStock = {};
 let currentDeviceStatus = {};
 let allEventsList = [];
+let browserConnected = false;
+let serverTimeOffset = 0;
+let reportedConfig = {};
+let historyNodes = {};
 
 // DOM Elements - Trạng thái & Kết nối
 const connStatusPill = document.getElementById('connStatusPill');
@@ -57,53 +92,64 @@ const configFormContent = document.getElementById('configFormContent');
 // 2. GIÁM SÁT TRẠNG THÁI KẾT NỐI (CONNECTION STATUS)
 // =========================================================================
 db.ref('.info/connected').on('value', (snap) => {
-  const isOnline = snap.val() === true;
-  if (isOnline) {
-    connPulse.className = 'pulse-dot online';
-    connStatusText.textContent = 'Hệ thống: Trực tuyến';
-    connStatusPill.style.borderColor = 'rgba(16, 185, 129, 0.4)';
-  } else {
-    connPulse.className = 'pulse-dot offline';
-    connStatusText.textContent = 'Hệ thống: Mất kết nối';
-    connStatusPill.style.borderColor = 'rgba(244, 63, 94, 0.4)';
-  }
+  browserConnected = snap.val() === true;
+  renderConnection();
 });
+
+db.ref('.info/serverTimeOffset').on('value', snap => {
+  serverTimeOffset = Number.isFinite(snap.val()) ? snap.val() : 0;
+  renderConnection();
+});
+
+function serverNow() { return Date.now() + serverTimeOffset; }
+
+function renderConnection() {
+  const status = PillboxModel.connection(currentDeviceStatus, browserConnected, serverNow());
+  connPulse.className = `pulse-dot ${status.online ? 'online' : 'offline'}`;
+  connStatusText.textContent = status.label;
+  connStatusPill.style.borderColor = status.online ? 'rgba(16, 185, 129, 0.4)' : 'rgba(244, 63, 94, 0.4)';
+  lastSeenDisplay.classList.toggle('data-stale', !status.online);
+}
+
+// Tự phát hiện ESP32 ngừng gửi ngay cả khi không có callback Firebase mới.
+setInterval(renderConnection, 1000);
 
 // =========================================================================
 // 3. LẮNG NGHE THÔNG SỐ VẬN HÀNH (/deviceStatus)
 // =========================================================================
-db.ref('deviceStatus').on('value', (snap) => {
+watchDatabase('deviceStatus', (snap) => {
   const data = snap.val() || {};
   currentDeviceStatus = data;
+  renderConnection();
 
   // Nhiệt độ & Độ ẩm
-  const temp = (typeof data.currentTemp === 'number') ? data.currentTemp.toFixed(1) : '--';
-  const humid = (typeof data.currentHumid === 'number') ? data.currentHumid.toFixed(1) : '--';
+  const temp = Number.isFinite(data.currentTemp) ? data.currentTemp.toFixed(1) : '--';
+  const humid = Number.isFinite(data.currentHumid) ? data.currentHumid.toFixed(1) : '--';
   teleTemp.textContent = temp;
   teleHumid.textContent = humid;
 
   // Cảnh báo ngưỡng nhiệt độ (> 35°C)
   if (data.currentTemp && data.currentTemp > 35.0) {
     tempCard.style.borderColor = 'var(--accent-rose)';
-    tempAlertHint.textContent = 'Cảnh báo: Vượt ngưỡng an toàn (> 35°C)';
+    tempAlertHint.textContent = 'Vượt ngưỡng demo (> 35°C)';
     tempAlertHint.style.color = 'var(--accent-rose)';
   } else {
     tempCard.style.borderColor = 'var(--border-color)';
-    tempAlertHint.textContent = 'Tiêu chuẩn bảo quản: < 35°C';
+    tempAlertHint.textContent = Number.isFinite(data.currentTemp) ? 'Ngưỡng demo: 35°C; xem nhãn thuốc' : 'Chưa có mẫu nhiệt độ hợp lệ';
     tempAlertHint.style.color = 'var(--text-muted)';
   }
 
   // Cảnh báo ngưỡng độ ẩm (> 75%)
   if (data.currentHumid && data.currentHumid > 75.0) {
-    humidAlertHint.textContent = 'Cảnh báo: Vượt ngưỡng độ ẩm (> 75%)';
+    humidAlertHint.textContent = 'Vượt ngưỡng demo (> 75%)';
     humidAlertHint.style.color = 'var(--accent-rose)';
   } else {
-    humidAlertHint.textContent = 'Tiêu chuẩn bảo quản: < 75%';
+    humidAlertHint.textContent = Number.isFinite(data.currentHumid) ? 'Ngưỡng demo độ ẩm: 75%' : 'Chưa có mẫu độ ẩm hợp lệ';
     humidAlertHint.style.color = 'var(--text-muted)';
   }
 
   // Trạng thái vận hành thiết bị
-  const stateStr = data.currentState || 'STATE_IDLE';
+  const stateStr = data.currentState;
   teleState.textContent = getFsmStateTitle(stateStr);
   fsmDescription.textContent = getFsmDescription(stateStr);
 
@@ -123,8 +169,9 @@ db.ref('deviceStatus').on('value', (snap) => {
   }
 
   // Thời gian cập nhật gần nhất
-  if (data.lastSeen) {
-    const date = new Date(data.lastSeen * 1000);
+  const receivedAt = PillboxModel.receivedTime(data);
+  if (receivedAt !== null) {
+    const date = new Date(receivedAt);
     lastSeenDisplay.textContent = `Cập nhật: ${date.toLocaleTimeString('vi-VN')} - ${date.toLocaleDateString('vi-VN')}`;
   } else {
     lastSeenDisplay.textContent = 'Cập nhật: Chưa nhận tín hiệu';
@@ -132,55 +179,42 @@ db.ref('deviceStatus').on('value', (snap) => {
 });
 
 function getFsmStateTitle(state) {
-  switch (state) {
-    case 'STATE_IDLE': return 'Chờ cữ thuốc';
-    case 'STATE_REMINDER': return 'Đang báo giờ uống';
-    case 'STATE_SNOOZED': return 'Đang tạm hoãn';
-    case 'STATE_COMPARTMENT_OPEN': return 'Đang mở ngăn';
-    case 'STATE_VERIFYING': return 'Đang kiểm tra';
-    case 'STATE_VERIFIED': return 'Đã lấy đủ liều';
-    case 'STATE_ERROR': return 'Cảnh báo sự cố';
-    case 'STATE_CLOSED': return 'Đã đóng nắp';
-    default: return state;
-  }
+  return PillboxModel.stateInfo(state)[0];
 }
 
 function getFsmDescription(state) {
-  switch (state) {
-    case 'STATE_IDLE': return 'Hộp thuốc ở chế độ chờ cữ tiếp theo';
-    case 'STATE_REMINDER': return 'Hệ thống đang phát chuông và đèn nhắc nhở';
-    case 'STATE_SNOOZED': return 'Người bệnh tạm hoãn, sẽ nhắc lại sau 5 phút';
-    case 'STATE_COMPARTMENT_OPEN': return 'Nắp ngăn đang mở, chờ lấy thuốc';
-    case 'STATE_VERIFYING': return 'Đang đối chiếu số lượng thuốc lấy ra';
-    case 'STATE_VERIFIED': return 'Đã xác nhận lấy đúng và đủ liều chỉ định';
-    case 'STATE_ERROR': return 'Phát hiện lấy sai liều hoặc quá thời gian chờ';
-    case 'STATE_CLOSED': return 'Đã khóa nắp ngăn để bảo quản thuốc';
-    default: return 'Thiết bị hoạt động bình thường';
-  }
+  return PillboxModel.stateInfo(state)[1];
 }
 
 // =========================================================================
 // 4. LẮNG NGHE CẤU HÌNH CÁC NGĂN THUỐC (/config/compartments)
 // =========================================================================
-db.ref('config/compartments').on('value', (snap) => {
+watchDatabase('config/compartments', (snap) => {
   const comps = snap.val() || {};
   currentCompartments = comps;
   renderCompartments(comps);
 });
 
-db.ref('inventory/compartments').on('value', (snap) => {
+watchDatabase('inventory/compartments', (snap) => {
   currentInventory = snap.val() || {};
   renderCompartments(currentCompartments);
 });
 
-db.ref('inventoryCommands/pending').on('value', (snap) => {
+watchDatabase('inventoryCommands/pending', (snap) => {
   pendingInventoryCommands = snap.val() || {};
   renderCompartments(currentCompartments);
 });
 
-db.ref('inventoryCommands/status').on('value', (snap) => {
+watchDatabase('inventoryCommands/status', (snap) => {
   inventoryCommandStatus = snap.val() || {};
   renderCompartments(currentCompartments);
+});
+
+watchDatabase('reportedConfig', snap => {
+  reportedConfig = snap.val() || {};
+  renderCompartments(currentCompartments);
+}, error => {
+  document.getElementById('configSyncSummary').textContent = 'Không đọc được xác nhận cấu hình: ' + error.message;
 });
 
 function escapeHtml(value) {
@@ -209,6 +243,10 @@ function renderCompartments(comps) {
   const compKeys = Object.keys(comps).sort();
 
   compCountLabel.textContent = `${compKeys.length} ngăn chứa`;
+  const confirmedCount = ['A', 'B', 'C'].filter(id =>
+    PillboxModel.configMatches(comps[id], reportedConfig.compartments?.[id])).length;
+  document.getElementById('configSyncSummary').textContent =
+    `Cấu hình trùng với bản ESP32 báo gần nhất: ${confirmedCount}/3 ngăn. Kết nối thiết bị được theo dõi riêng ở trên.`;
 
   if (compKeys.length === 0) {
     compartmentsContainer.innerHTML = `
@@ -222,7 +260,7 @@ function renderCompartments(comps) {
   compKeys.forEach(key => {
     const c = comps[key];
     const card = document.createElement('div');
-    const classId = `comp-${c.compartmentId ? c.compartmentId.toLowerCase() : 'a'}`;
+    const classId = `comp-${['A', 'B', 'C'].includes(key) ? key.toLowerCase() : 'a'}`;
     card.className = `card comp-card ${classId}`;
 
     const maxStock = 100;
@@ -235,7 +273,7 @@ function renderCompartments(comps) {
     card.innerHTML = `
       <div class="comp-header">
         <div>
-          <span class="comp-id-badge">NGĂN ${c.compartmentId}</span>
+          <span class="comp-id-badge">NGĂN ${escapeHtml(c.compartmentId)}</span>
           <h3 class="comp-title">${escapeHtml(c.displayName || 'Chưa đặt tên')}</h3>
           <span class="comp-code">Mã dược phẩm: ${escapeHtml(c.medicineCode || '--')}</span>
         </div>
@@ -253,7 +291,7 @@ function renderCompartments(comps) {
         </div>
         <div class="meta-item">
           <span class="meta-item-label">Liều chỉ định</span>
-          <span class="meta-item-val">${c.unitsPerDose || 1} viên / lần</span>
+          <span class="meta-item-val">${escapeHtml(c.unitsPerDose ?? '--')} viên / lần</span>
         </div>
       </div>
 
@@ -266,6 +304,9 @@ function renderCompartments(comps) {
           <div class="stock-progress-fill" style="width: ${stockPercent}%;"></div>
         </div>
         <div class="stock-sync-state">${getInventorySyncLabel(key, inventoryNode)}</div>
+        <div class="stock-sync-state">${PillboxModel.configMatches(c, reportedConfig.compartments?.[key])
+          ? 'Lịch và liều khớp bản ESP32 báo gần nhất'
+          : 'Lịch và liều đang chờ ESP32 áp dụng / xác nhận'}</div>
       </div>
     `;
 
@@ -276,7 +317,7 @@ function renderCompartments(comps) {
 // =========================================================================
 // 5. LẮNG NGHE NHẬT KÝ TUÂN THỦ DÙNG THUỐC (/events)
 // =========================================================================
-db.ref('events').on('value', (snap) => {
+watchDatabase('events', (snap) => {
   const eventsData = snap.val() || {};
   allEventsList = [];
 
@@ -293,6 +334,59 @@ db.ref('events').on('value', (snap) => {
   logCountLabel.textContent = `${allEventsList.length} bản ghi`;
   renderEventsTable(allEventsList);
 });
+
+// Lịch sử lưu bằng vòng 1440 ô; luôn sắp xếp theo timestamp, không theo mã ô.
+watchDatabase('telemetryHistory', snap => {
+  historyNodes = snap.val() || {};
+  renderHistory();
+}, error => {
+  document.getElementById('historySummary').textContent = 'Không đọc được lịch sử: ' + error.message;
+}, 1440);
+document.getElementById('historyRange').addEventListener('change', renderHistory);
+setInterval(renderHistory, 60000);
+
+function renderHistory() {
+  const minutes = Number(document.getElementById('historyRange').value);
+  const now = serverNow();
+  const samples = PillboxModel.historySamples(historyNodes, minutes, now);
+  const validCount = samples.filter(s => Number.isFinite(s.temperature) && Number.isFinite(s.humidity)).length;
+  document.getElementById('historySummary').textContent =
+    `${samples.length} mẫu trong khoảng xem, ${validCount} mẫu đủ nhiệt độ và độ ẩm. Lưu tối đa 1440 mẫu, một mẫu/phút khi có mạng và giờ hợp lệ.`;
+  renderSensorChart('temperatureChart', 'Nhiệt độ', '°C', 'temperature', samples, minutes, now, '#22d3ee');
+  renderSensorChart('humidityChart', 'Độ ẩm', '%', 'humidity', samples, minutes, now, '#a78bfa');
+}
+
+function renderSensorChart(elementId, title, unit, field, samples, minutes, now, color) {
+  const element = document.getElementById(elementId);
+  const valid = samples.filter(sample => Number.isFinite(sample[field]));
+  if (!valid.length) {
+    element.innerHTML = `<h3>${title} (${unit})</h3><p class="text-muted">Chưa có mẫu hợp lệ trong khoảng xem.</p>`;
+    return;
+  }
+  const values = valid.map(sample => sample[field]);
+  const low = Math.floor(Math.min(...values) - 1);
+  const high = Math.ceil(Math.max(...values) + 1);
+  const start = now - minutes * 60000;
+  const x = sample => 52 + Math.min(1, Math.max(0, (sample.timestamp * 1000 - start) / (minutes * 60000))) * 630;
+  const y = sample => 170 - ((sample[field] - low) / (high - low)) * 140;
+  let path = '';
+  let previous = null;
+  samples.forEach(sample => {
+    if (!Number.isFinite(sample[field])) { previous = null; return; }
+    const connected = previous && sample.timestamp - previous.timestamp <= 120;
+    path += `${connected ? 'L' : 'M'}${x(sample).toFixed(1)},${y(sample).toFixed(1)} `;
+    previous = sample;
+  });
+  const clock = value => new Date(value).toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' });
+  element.innerHTML = `<h3>${title} (${unit})</h3>
+    <svg viewBox="0 0 720 210" role="img" aria-label="Biểu đồ ${title.toLowerCase()} trong ${minutes} phút">
+      <path d="M52 30V170H682" fill="none" stroke="#64748b"/>
+      <text x="44" y="35" text-anchor="end">${high}</text><text x="44" y="174" text-anchor="end">${low}</text>
+      <text x="52" y="198">${clock(start)}</text><text x="682" y="198" text-anchor="end">${clock(now)} UTC+7</text>
+      <path d="${path}" fill="none" stroke="${color}" stroke-width="2.5"/>
+      ${valid.map(sample => `<circle cx="${x(sample).toFixed(1)}" cy="${y(sample).toFixed(1)}" r="2" fill="${color}"><title>${clock(sample.timestamp * 1000)}: ${sample[field].toFixed(1)} ${unit}</title></circle>`).join('')}
+    </svg>`;
+}
 
 function renderEventsTable(events) {
   if (events.length === 0) {
@@ -327,12 +421,12 @@ function renderEventsTable(events) {
 
     tr.innerHTML = `
       <td style="font-family: var(--font-mono); font-size: 0.8rem;">${timeFormatted}</td>
-      <td style="font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-muted);">${ev.eventId || ev._key}</td>
-      <td><strong>Ngăn ${ev.compartmentId || '--'}</strong></td>
-      <td style="font-family: var(--font-mono);">${ev.medicineCode || '--'}</td>
-      <td>${ev.expectedUnits !== undefined ? ev.expectedUnits + ' viên' : '--'}</td>
+      <td style="font-family: var(--font-mono); font-size: 0.76rem; color: var(--text-muted);">${escapeHtml(ev.eventId || ev._key)}</td>
+      <td><strong>Ngăn ${escapeHtml(ev.compartmentId || '--')}</strong></td>
+      <td style="font-family: var(--font-mono);">${escapeHtml(ev.medicineCode || '--')}</td>
+      <td>${ev.expectedUnits !== undefined ? escapeHtml(ev.expectedUnits) + ' viên' : '--'}</td>
       <td style="font-weight: 700; color: ${ev.quantityMatch ? 'var(--accent-emerald)' : 'var(--accent-rose)'};">
-        ${ev.detectedUnits !== undefined ? ev.detectedUnits + ' viên' : '--'}
+        ${ev.detectedUnits !== undefined ? escapeHtml(ev.detectedUnits) + ' viên' : '--'}
       </td>
       <td>${userActionBadge}</td>
       <td>${statusBadge}</td>
@@ -357,13 +451,14 @@ function getEvaluationBadge(status, match) {
   if (status === 'MISSED_DOSE') {
     return `<span class="badge badge-danger">Bỏ lỡ cữ thuốc</span>`;
   }
-  return `<span class="badge badge-info">${status || 'Đã ghi nhận'}</span>`;
+  return `<span class="badge badge-info">${escapeHtml(status || 'Đã ghi nhận')}</span>`;
 }
 
 // =========================================================================
 // 6. CẤU HÌNH LỊCH TRÌNH TỪ XA (REMOTE CONFIGURATION MODAL)
 // =========================================================================
 btnOpenConfig.addEventListener('click', () => {
+  if (!PillboxAccess.canWrite()) return;
   renderConfigModalForm();
   configModal.classList.add('open');
 });
@@ -432,6 +527,7 @@ function renderConfigModalForm() {
 }
 
 btnSaveConfig.addEventListener('click', async () => {
+  if (!PillboxAccess.canWrite()) { alert('Tài khoản không có quyền thay đổi cấu hình.'); return; }
   btnSaveConfig.disabled = true;
   btnSaveConfig.textContent = 'Đang lưu dữ liệu...';
 
@@ -447,8 +543,8 @@ btnSaveConfig.addEventListener('click', async () => {
     const currentStock = stockText === '' ? NaN : Number(stockText);
     const isLoaded = document.getElementById(`cfg_loaded_${k}`).value === 'true';
 
-    if (!displayName || displayName.length > 31) validationError = `Tên thuốc ngăn ${k} phải có 1–31 ký tự.`;
-    else if (!medicineCode || medicineCode.length > 15) validationError = `Mã thuốc ngăn ${k} phải có 1–15 ký tự.`;
+    if (!displayName || PillboxModel.utf8Length(displayName) > 31) validationError = `Tên thuốc ngăn ${k} phải có 1–31 byte UTF-8 (chữ có dấu dùng nhiều byte).`;
+    else if (!medicineCode || PillboxModel.utf8Length(medicineCode) > 15) validationError = `Mã thuốc ngăn ${k} phải có 1–15 byte UTF-8.`;
     else if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(schedule)) validationError = `Giờ uống ngăn ${k} không hợp lệ.`;
     else if (!Number.isInteger(unitsPerDose) || unitsPerDose < 1 || unitsPerDose > 10) validationError = `Liều ngăn ${k} phải từ 1 đến 10 viên.`;
     else if (!Number.isInteger(currentStock) || currentStock < 0 || currentStock > 100) validationError = `Tồn kho ngăn ${k} phải từ 0 đến 100 viên.`;
@@ -520,3 +616,51 @@ btnSaveConfig.addEventListener('click', async () => {
     `;
   }
 });
+
+watchDatabase('alarms', snap => {
+  const list = document.getElementById('alarmsList');
+  list.innerHTML = '';
+  const alarms = Object.values(snap.val() || {}).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 100);
+  if (!alarms.length) { list.textContent = 'Chưa có cảnh báo.'; return; }
+  alarms.forEach(alarm => {
+    const row = document.createElement('div');
+    row.className = 'alarm-row';
+    const severity = alarm.severity === 'CRITICAL' ? 'Khẩn cấp' : 'Cảnh báo';
+    const state = { ACTIVE: 'Đang mở', ACKNOWLEDGED: 'Đã xác nhận', CLEARED: 'Đã phục hồi' }[alarm.state] || 'Không rõ';
+    row.innerHTML = `<div><strong>${escapeHtml(alarm.type)}</strong> • ${severity} • ${state}<br><small>${escapeHtml(new Date(alarm.updatedAt).toLocaleString('vi-VN'))}</small></div>`;
+    if (alarm.state === 'ACTIVE' && PillboxAccess.canWrite()) {
+      const button = document.createElement('button');
+      button.className = 'btn btn-outline'; button.textContent = 'Xác nhận đã xem';
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          const response = await fetch(`/api/alarms/${encodeURIComponent(alarm.alarmId)}/ack`, { method: 'POST',
+            headers: { Authorization: `Bearer ${await PillboxAccess.token()}`, 'Content-Type': 'application/json' }, body: '{}' });
+          if (!response.ok) throw new Error('ACK_FAILED');
+        } catch { alert('Chưa xác nhận được cảnh báo. Kiểm tra dịch vụ nền và quyền truy cập.'); button.disabled = false; }
+      });
+      row.appendChild(button);
+    }
+    list.appendChild(row);
+  });
+});
+watchDatabase('alarmEvents', snap => {
+  const timeline = document.getElementById('alarmTimeline');
+  timeline.innerHTML = '';
+  const entries = Object.values(snap.val() || {}).sort((a,b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0,50);
+  if (!entries.length) { timeline.textContent = 'Chưa có chuyển trạng thái.'; return; }
+  const transitions = { OPENED:'Mở cảnh báo', ESCALATED:'Tăng mức', ACKNOWLEDGED:'Đã xác nhận xem', CLEARED:'Đã phục hồi' };
+  entries.forEach(entry => {
+    const row = document.createElement('div'); row.className = 'alarm-row';
+    row.textContent = `${new Date(entry.updatedAt).toLocaleString('vi-VN')} • ${entry.type} • ${transitions[entry.transition] || entry.transition}`;
+    timeline.appendChild(row);
+  });
+});
+watchDatabase('notificationStatus', snap => {
+  const jobs = Object.values(snap.val() || {});
+  const count = state => jobs.filter(job => job.state === state).length;
+  document.getElementById('notificationSummary').textContent = jobs.length
+    ? `Telegram: ${count('SENT')} đã gửi • ${count('PENDING')} chờ gửi/cấu hình • ${count('FAILED')} lỗi • ${count('EXPIRED')} hết hạn.`
+    : 'Chưa có bản ghi gửi thông báo Telegram.';
+});
+PillboxAccess.start(updateAccess);

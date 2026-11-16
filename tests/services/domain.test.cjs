@@ -1,0 +1,58 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+const { emptyState, Store } = require('../../services/store.cjs');
+const { canWrite, temperatureCondition, applyCondition, evaluateTelemetry, acknowledge } = require('../../services/domain.cjs');
+test('role claims are bound to the intended pillbox', () => {
+  assert.equal(canWrite({ role: 'viewer', pillboxId: 'pillbox-nhom13' }), false);
+  assert.equal(canWrite({ role: 'admin', pillboxId: 'someone-else' }), false);
+  assert.equal(canWrite({ role: 'caregiver', pillboxId: 'pillbox-nhom13' }), true);
+});
+test('warning boundaries, critical escalation, hysteresis, clear and reopen', () => {
+  const s = emptyState();
+  assert.equal(temperatureCondition(29), 'HOLD');
+  assert.equal(temperatureCondition(30), 'WARNING');
+  assert.equal(temperatureCondition(35), 'WARNING');
+  assert.equal(temperatureCondition(35.1), 'CRITICAL');
+  assert.equal(temperatureCondition(28), 'HOLD');
+  applyCondition(s, 'HIGH_TEMPERATURE', temperatureCondition(30), 100);
+  const first = s.current.HIGH_TEMPERATURE.alarmId;
+  assert.equal(Object.keys(s.outbox).length, 0);
+  applyCondition(s, 'HIGH_TEMPERATURE', temperatureCondition(40), 200);
+  assert.equal(s.current.HIGH_TEMPERATURE.severity, 'CRITICAL');
+  assert.equal(Object.keys(s.outbox).length, 1);
+  assert.equal(applyCondition(s, 'HIGH_TEMPERATURE', temperatureCondition(40), 300), false);
+  assert.equal(applyCondition(s, 'HIGH_TEMPERATURE', temperatureCondition(29), 400), false);
+  applyCondition(s, 'HIGH_TEMPERATURE', temperatureCondition(27), 500);
+  assert.equal(s.current.HIGH_TEMPERATURE.state, 'CLEARED');
+  assert.equal(Object.keys(s.outbox).length, 2);
+  applyCondition(s, 'HIGH_TEMPERATURE', 'WARNING', 600);
+  assert.notEqual(s.current.HIGH_TEMPERATURE.alarmId, first);
+});
+test('ack requires writer and survives restart before automatic clear', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pillbox-'));
+  const file = path.join(directory, 'state.json');
+  let store = new Store(file);
+  store.commit(s => applyCondition(s, 'HIGH_TEMPERATURE', 'CRITICAL', 100));
+  const id = store.state.current.HIGH_TEMPERATURE.alarmId;
+  assert.throws(() => store.commit(s => acknowledge(s, id, { role: 'viewer', pillboxId: 'pillbox-nhom13' }, 200)));
+  store = new Store(file);
+  store.commit(s => acknowledge(s, id, { uid: 'care', role: 'caregiver', pillboxId: 'pillbox-nhom13' }, 200));
+  store = new Store(file);
+  assert.equal(store.state.alarms[id].state, 'ACKNOWLEDGED');
+  store.commit(s => applyCondition(s, 'HIGH_TEMPERATURE', 'NORMAL', 300));
+  assert.equal(store.state.alarms[id].acknowledgedBy, 'care');
+  assert.equal(store.state.alarms[id].state, 'CLEARED');
+  fs.rmSync(directory, { recursive: true });
+});
+test('stale or invalid data never clears a temperature alarm', () => {
+  const s = emptyState();
+  applyCondition(s, 'HIGH_TEMPERATURE', 'CRITICAL', 1);
+  evaluateTelemetry(s, { receivedAt: 1, currentTemp: 20, sensorValid: true }, 20000);
+  assert.equal(s.current.HIGH_TEMPERATURE.state, 'ACTIVE');
+  evaluateTelemetry(s, { receivedAt: 20000, currentTemp: null, sensorValid: false }, 20001);
+  assert.equal(s.current.HIGH_TEMPERATURE.state, 'ACTIVE');
+  assert.equal(s.current.SENSOR_INVALID.state, 'ACTIVE');
+});
